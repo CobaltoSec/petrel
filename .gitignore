@@ -10,3 +10,4 @@ venv/
 *.json
 !pyproject.toml
 *.jsonl
+targets-petrel*.yaml
