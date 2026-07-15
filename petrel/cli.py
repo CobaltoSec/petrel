@@ -252,26 +252,33 @@ def feed_corvus(
         err.print(f"[red]Invalid --min-risk: {min_risk}. Choose from: {', '.join(tier_order)}[/red]")
         raise typer.Exit(1)
 
-    records: list[dict] = []
+    all_records: list[dict] = []
     for line in results.read_text().splitlines():
         line = line.strip()
         if not line:
             continue
         r = json.loads(line)
         if tier_order.index(r.get("risk_tier", "INFO")) <= min_idx:
-            records.append(r)
+            all_records.append(r)
 
-    if not records:
+    if not all_records:
         console.print(f"[yellow]No records matching --min-risk {min_risk}[/yellow]")
         raise typer.Exit(0)
 
+    # Corvus batch only supports streamable-http — SSE legacy is skipped
+    records = [r for r in all_records if r.get("protocol") == "streamable-http"]
+    skipped = len(all_records) - len(records)
+    if skipped:
+        console.print(f"[dim]Skipped {skipped} SSE-legacy servers (corvus doesn't support SSE transport)[/dim]")
+
     targets = []
     for r in records:
-        # Pass base URL — corvus auto-detects the correct endpoint path
         url = r["url"].rstrip("/")
+        # Streamable HTTP: corvus needs the MCP endpoint path
+        target_url = f"{url}/mcp"
 
         name = url.removeprefix("https://").removeprefix("http://").replace(".", "-").replace(":", "-")[:48]
-        entry: dict = {"name": name, "transport": "http", "url": url}
+        entry: dict = {"name": name, "transport": "http", "url": target_url}
         if r.get("risk_tier") in ("CRITICAL", "HIGH"):
             entry["tags"] = [f"petrel-{r['risk_tier'].lower()}", "no-auth"]
         targets.append(entry)
