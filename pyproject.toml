@@ -25,6 +25,7 @@ dependencies = [
     "pydantic>=2.5",
     "rich>=13",
     "anyio>=4",
+    "pyyaml>=6",
 ]
 
 [project.optional-dependencies]

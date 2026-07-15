@@ -232,6 +232,63 @@ def _print_summary(records: list[MCPServerRecord]) -> None:
             console.print(f"  [red]→[/red] {r.url}  [dim]{', '.join(r.risk_reasons[:2])}[/dim]")
 
 
+@app.command(name="feed-corvus")
+def feed_corvus(
+    results: Annotated[Path, typer.Argument(help="Petrel results.jsonl file")],
+    output: Annotated[Optional[Path], typer.Option("--output", "-o", help="Output YAML (default: stdout)")] = None,
+    min_risk: Annotated[str, typer.Option("--min-risk", help="Minimum risk tier to include")] = "INFO",
+) -> None:
+    """Convert Petrel results.jsonl → Corvus batch targets YAML."""
+    import yaml  # type: ignore[import]
+
+    if not results.exists():
+        err.print(f"[red]File not found: {results}[/red]")
+        raise typer.Exit(1)
+
+    tier_order = [t.value for t in RiskTier]
+    try:
+        min_idx = tier_order.index(min_risk.upper())
+    except ValueError:
+        err.print(f"[red]Invalid --min-risk: {min_risk}. Choose from: {', '.join(tier_order)}[/red]")
+        raise typer.Exit(1)
+
+    records: list[dict] = []
+    for line in results.read_text().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        r = json.loads(line)
+        if tier_order.index(r.get("risk_tier", "INFO")) <= min_idx:
+            records.append(r)
+
+    if not records:
+        console.print(f"[yellow]No records matching --min-risk {min_risk}[/yellow]")
+        raise typer.Exit(0)
+
+    targets = []
+    for r in records:
+        # Pass base URL — corvus auto-detects the correct endpoint path
+        url = r["url"].rstrip("/")
+
+        name = url.removeprefix("https://").removeprefix("http://").replace(".", "-").replace(":", "-")[:48]
+        entry: dict = {"name": name, "transport": "http", "url": url}
+        if r.get("risk_tier") in ("CRITICAL", "HIGH"):
+            entry["tags"] = [f"petrel-{r['risk_tier'].lower()}", "no-auth"]
+        targets.append(entry)
+
+    doc = {"targets": targets}
+    yaml_str = yaml.dump(doc, default_flow_style=False, allow_unicode=True, sort_keys=False)
+
+    if output:
+        output.write_text(yaml_str)
+        console.print(f"[green]✓[/green] {len(targets)} targets → {output}")
+        for r in records:
+            tier_color = _TIER_COLOR.get(RiskTier(r["risk_tier"]), "white")
+            console.print(f"  [{tier_color}]{r['risk_tier']}[/{tier_color}] {r['url']}")
+    else:
+        console.print(yaml_str)
+
+
 def _version_callback(value: bool) -> None:
     if value:
         print(f"petrel {__version__}")
