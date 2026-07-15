@@ -8,81 +8,74 @@ Repo: `github.com/CobaltoSec/petrel` · PyPI: pendiente token
 
 ## PETREL-V02 — ✅ CERRADO (2026-07-15)
 
-### Resultados D1 — Primer run real
-
-```
-crt.sh: 0 dominios (timeout — servicio lento, investigar)
-HuggingFace: 564 spaces (4 queries × paginación 500/página)
-Censys: skipped (sin credenciales)
-Candidates: 562 únicos
-Confirmed MCP: 72 servers
-  CRITICAL: 1 — amirhashmi017-mcp-server-and-langgraph-agent.hf.space
-  LOW: 56 | INFO: 15
-```
-
-**CRITICAL encontrado**: `https://amirhashmi017-mcp-server-and-langgraph-agent.hf.space`
-- "Unified MCP Server" v1.0.0, 46 tools expuestos, sin auth MCP
-- Plataforma: Volvox/Innoscope/Kickstart (SaaS de research/propuestas)
-- Tools requieren JWT interno → acceso via `volvox_auth_signup` libre
-- Candidato bajo para Ibis (no es execute_bash), pero documenta el patrón
-
-### D2 — ✅ Completado
-
-- **D2a** HF: 4 queries + paginación 500/página → 564 spaces (era 100)
-- **D2b** crt.sh: sin filtro de dominio + 4 keywords (timeout pendiente)
-- **D2c** Censys: módulo nuevo opcional (`CENSYS_API_ID` + `CENSYS_API_SECRET`)
-- **Fix bonus**: `_probe_sse()` ahora llama `_get_tools()` → 45→72 servers (+60%)
-
-### Gotchas registrados
-
-- crt.sh: `%25keyword%25` era double-encoding. Usar `params={"q": keyword}` directo.
-- crt.sh: requests concurrentes → rate limit. Usar sequential + `sleep(1.0)`.
-- crt.sh: sigue timeout-ing intermitentemente. Issue pendiente (no bloqueante).
-- pytest_httpx 0.36.2: no soporta `url__startswith`. Usar `url=re.compile()` + `is_reusable=True`.
+- D1: primer run real — 72 MCP servers confirmados (562 candidates → 72)
+- D2a: HF Spaces — 4 queries + paginación 500/página → 564 spaces
+- D2b: crt.sh — 4 keywords, sequential sleep(1.0), sin doble-encoding
+- D2c: Censys — módulo opcional CENSYS_API_ID/SECRET
 
 ---
 
-## Próximo: PETREL-V03
+## PETREL-V03 — ✅ CERRADO (2026-07-15)
 
-### D3 (siguiente) — `petrel feed-corvus` bridge
+### D3 — `petrel feed-corvus` bridge ✅
 
-Convierte `results.jsonl` (Petrel) → YAML targets para `corvus batch`.
+Convierte `results.jsonl` → YAML targets para `corvus batch`. Filtra SSE-legacy, agrega `/mcp`.
 
-```bash
-petrel feed-corvus results.jsonl -o targets.yaml
-corvus batch targets.yaml --fast
-```
+### D4 — Pipeline Petrel→Corvus Run 1 ✅
 
-Formato output:
-```yaml
-- name: "server-name"
-  transport: http
-  url: "https://..."
-  # tags: [petrel-critical, no-auth]
-```
+12 streamable-http targets → 6 con results (6 ERROR no accesibles):
+- `arsalan-joiya-gmail-mcp-server`: 9 HIGH, score 100/100 — email injection
+- `lambmm-roche-mcp-tools`: 2 HIGH — XHS post injection reflejada en LLM output
+- `galcan-mcp-docs-server`: 1 HIGH — reflected XSS "Chunk X not found"
+- `amirhashmi017` (46 tools): 2 HIGH — scope creep credential fields
 
-Implementar como subcomando en `cli.py`. Filtrar por `is_confirmed_mcp == True`.
+**Conclusión:** Todos HF Spaces personales → no califican Ibis GHSA. Material perfecto para Ekoparty case study.
 
-### D4 — Review manual de CRITICAL
+Resultados en: `corvus/case-studies/petrel-run1/results-full/`
 
-Después de D1: abrir `results.jsonl`, filtrar `risk_tier == CRITICAL`, revisar manualmente.
-- `execute_bash` sin auth → candidato para Ibis advisory
-- Documentar en `sectors/red-team/petrel-finds/YYYY-MM-DD-first-run/`
+---
+
+## Próximo: PETREL-V04
+
+### Objetivo
+Active discovery + Shodan para encontrar MCP servers fuera de HuggingFace.
+
+### D1 — Shodan integration
+- Query: `http.html:"serverInfo" AND http.html:"protocolVersion"`
+- Alternativa free: `shodan search` CLI (1 query = 100 hosts)
+- Requiere `SHODAN_API_KEY`
+
+### D2 — masscan → petrel probe pipeline
+- Kali: `masscan 0.0.0.0/0 -p 8000-9000 --rate 10000`
+- Filter HTTP → `petrel probe` batch
+- Only for private/authorized nets — lab first
+
+### D3 — crt.sh reliability fix
+- Investigar rate limit permanente vs timeout intermitente
+- Considerar User-Agent header custom
+- Alternativa: `crtsh.com` API endpoint alternativo
+
+### D4 — Feed Corvus v2: SSE support
+- Corvus batch actualmente solo streamable-http
+- Research: Corvus SSE transport support?
+- Alternativa: petrel feed → direct HTTP probe sin corvus batch
+
+**Talla: M**
+**Dependencias:** Shodan API key opcional (D1), Kali access (D2)
 
 ---
 
 ## Pendiente manual (Nico)
 
 - **PyPI token**: pypi.org → Account Settings → API tokens → scope `cobaltosec-petrel` → update `~/.pypirc` → `python -m build && .venv/Scripts/twine upload dist/*`
-- **Limpiar stub**: `Remove-Item -Recurse -Force "C:\Proyectos\Petrel"`
+- **Shodan API key**: shodan.io → Account → API key → `SHODAN_API_KEY` en mcp_servers.json
 
 ---
 
-## Roadmap post-V02
+## Roadmap
 
 | Versión | Foco |
 |---------|------|
-| V03 | Shodan API (`$49/mo`) — query `http.html:"serverInfo"` + auto-dorks |
-| V04 | Active scan via masscan en Kali → httpx filter → petrel probe batch |
+| V04 | Active discovery — Shodan + masscan |
 | V05 | CobaltoHQ: emit `petrel.server.critical` → Telegram alert |
-| V06 | `petrel feed-corvus` full pipeline → SARIF automático |
+| V06 | SARIF automático desde pipeline Petrel→Corvus |
