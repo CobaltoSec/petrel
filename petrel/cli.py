@@ -12,6 +12,7 @@ from rich.console import Console
 from rich.table import Table
 
 from . import __version__
+from .discovery.censys import censys_search
 from .discovery.passive import crtsh_search, hf_spaces_search
 from .fingerprint.probe import probe_url, probe_urls_batch
 from .models import MCPServerRecord, RiskTier
@@ -82,10 +83,9 @@ def discover(
     output: Annotated[Optional[Path], typer.Option("--output", "-o", help="Save results (JSONL)")] = None,
     no_probe: Annotated[bool, typer.Option("--no-probe", help="Skip fingerprinting, list URLs only")] = False,
     concurrency: Annotated[int, typer.Option("--concurrency", "-c")] = 20,
-    hf_query: Annotated[str, typer.Option("--hf-query")] = "mcp-server",
-    crt_keyword: Annotated[str, typer.Option("--crt-keyword")] = "mcp",
+    no_censys: Annotated[bool, typer.Option("--no-censys", help="Skip Censys even if credentials are set")] = False,
 ) -> None:
-    """Discover exposed MCP servers via passive sources (crt.sh + HuggingFace Spaces)."""
+    """Discover exposed MCP servers via passive sources (crt.sh + HuggingFace + Censys)."""
     console.print(_BANNER)
 
     async def _run() -> list[MCPServerRecord]:
@@ -93,18 +93,29 @@ def discover(
 
         urls: list[str] = []
 
-        with console.status("[cyan]Querying crt.sh..."):
-            crt_domains = await crtsh_search(crt_keyword)
+        with console.status("[cyan]Querying crt.sh (4 keywords)..."):
+            crt_domains = await crtsh_search()
             crt_urls = [f"https://{d}" for d in crt_domains]
             urls.extend(crt_urls)
         console.print(f"  [green]crt.sh[/green]: {len(crt_domains)} domains")
 
-        with console.status("[cyan]Querying HuggingFace Spaces..."):
-            hf_urls = await hf_spaces_search(hf_query)
+        with console.status("[cyan]Querying HuggingFace Spaces (4 queries, paginated)..."):
+            hf_urls = await hf_spaces_search()
             urls.extend(hf_urls)
         console.print(f"  [green]HuggingFace[/green]: {len(hf_urls)} spaces")
 
-        # Deduplicate
+        if not no_censys:
+            import os
+            has_creds = bool(os.getenv("CENSYS_API_ID") and os.getenv("CENSYS_API_SECRET"))
+            if has_creds:
+                with console.status("[cyan]Querying Censys..."):
+                    censys_urls = await censys_search()
+                urls.extend(censys_urls)
+                console.print(f"  [green]Censys[/green]: {len(censys_urls)} hosts")
+            else:
+                console.print("  [dim]Censys: skipped (no CENSYS_API_ID/CENSYS_API_SECRET)[/dim]")
+
+        # Deduplicate preserving first-seen order
         urls = list(dict.fromkeys(urls))
         console.print(f"\n[bold]Candidates:[/bold] {len(urls)}")
 
@@ -209,7 +220,7 @@ def _print_summary(records: list[MCPServerRecord]) -> None:
         preview = "  ".join(r.url for r in tier_records[:3])
         if len(tier_records) > 3:
             preview += f"  [dim]+{len(tier_records) - 3} more[/dim]"
-        t.add_row(f"[{color}]{tier}[/{color}]", str(counts[tier]), preview)
+        t.add_row(f"[{color}]{tier.value}[/{color}]", str(counts[tier]), preview)
 
     console.print()
     console.print(t)

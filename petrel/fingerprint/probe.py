@@ -146,6 +146,7 @@ async def _probe_sse(url: str, client: httpx.AsyncClient) -> MCPServerRecord | N
                             record.server_name = info.get("name")
                             record.server_version = info.get("version")
                             record.protocol_version = result.get("protocolVersion")
+                        record.tools = await _get_tools(msg_endpoint, client)
                 except Exception:
                     pass
 
