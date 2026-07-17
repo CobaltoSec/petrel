@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-07-17
+
+### Added
+- `petrel discover`: GitHub passive search — 4 queries a la GitHub Search API (topic:mcp-server, in:name, in:readme), extrae `homepage` de repos filtrando source/docs links. Rate-limit aware: 6s entre queries sin token, 2s con `GITHUB_TOKEN`
+- `petrel discover`: npm registry passive — 4 queries concurrentes al registry público, extrae `links.homepage` de paquetes. Sin API key requerida
+- `petrel discover --no-github` / `--no-npm` para saltar fuentes individualmente
+- Cobertura real: 850 candidatos (vs 562 anterior, +51%)
+
+### Fixed
+- crt.sh: agrega `User-Agent: petrel/0.3.0 (security research)` para evitar bloqueos silenciosos
+- crt.sh: retry hasta 2 veces en `ReadTimeout`/`NetworkError` con backoff, y en 429 espera 5s
+- Skip list: agrega `github.io`, `npmjs.org`, `discord.com` en ambos módulos de discovery
+- 13 nuevos tests (33→46 total)
+
 ## [0.2.0] — 2026-07-15
 
 ### Added

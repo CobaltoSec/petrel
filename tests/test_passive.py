@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import re
 
+import httpx
 import pytest
 from pytest_httpx import HTTPXMock
 
@@ -135,6 +136,37 @@ async def test_hf_partial_query_failure(httpx_mock: HTTPXMock):
     )
     urls = await hf_spaces_search(["fail", "ok"])
     assert "https://user-good-space.hf.space" in urls
+
+
+@pytest.mark.asyncio
+async def test_crtsh_retries_on_read_timeout(httpx_mock: HTTPXMock, monkeypatch):
+    """ReadTimeout on first attempt triggers retry; second attempt succeeds."""
+    from unittest.mock import AsyncMock
+
+    monkeypatch.setattr("asyncio.sleep", AsyncMock())
+    httpx_mock.add_exception(
+        httpx.ReadTimeout("timeout"),
+        url=re.compile(r"https://crt\.sh/"),
+    )
+    httpx_mock.add_response(
+        url=re.compile(r"https://crt\.sh/"),
+        json=[{"name_value": "ok.example.com"}],
+    )
+    results = await crtsh_search(["mcp"])
+    assert "ok.example.com" in results
+
+
+@pytest.mark.asyncio
+async def test_crtsh_sends_user_agent_header(httpx_mock: HTTPXMock):
+    """Requests to crt.sh include a petrel User-Agent header."""
+    httpx_mock.add_response(
+        url=re.compile(r"https://crt\.sh/"),
+        json=[],
+        is_reusable=True,
+    )
+    await crtsh_search(["mcp"])
+    requests = httpx_mock.get_requests()
+    assert any("petrel/" in req.headers.get("user-agent", "") for req in requests)
 
 
 # --- Censys ---

@@ -13,6 +13,8 @@ from rich.table import Table
 
 from . import __version__
 from .discovery.censys import censys_search
+from .discovery.github import github_search
+from .discovery.npm import npm_search
 from .discovery.passive import crtsh_search, hf_spaces_search
 from .fingerprint.probe import probe_url, probe_urls_batch
 from .models import MCPServerRecord, RiskTier
@@ -84,8 +86,10 @@ def discover(
     no_probe: Annotated[bool, typer.Option("--no-probe", help="Skip fingerprinting, list URLs only")] = False,
     concurrency: Annotated[int, typer.Option("--concurrency", "-c")] = 20,
     no_censys: Annotated[bool, typer.Option("--no-censys", help="Skip Censys even if credentials are set")] = False,
+    no_github: Annotated[bool, typer.Option("--no-github", help="Skip GitHub search")] = False,
+    no_npm: Annotated[bool, typer.Option("--no-npm", help="Skip npm registry search")] = False,
 ) -> None:
-    """Discover exposed MCP servers via passive sources (crt.sh + HuggingFace + Censys)."""
+    """Discover exposed MCP servers via passive sources (crt.sh + HuggingFace + Censys + GitHub + npm)."""
     console.print(_BANNER)
 
     async def _run() -> list[MCPServerRecord]:
@@ -114,6 +118,18 @@ def discover(
                 console.print(f"  [green]Censys[/green]: {len(censys_urls)} hosts")
             else:
                 console.print("  [dim]Censys: skipped (no CENSYS_API_ID/CENSYS_API_SECRET)[/dim]")
+
+        if not no_github:
+            with console.status("[cyan]Querying GitHub (4 queries, rate-limited)..."):
+                github_urls = await github_search()
+            urls.extend(github_urls)
+            console.print(f"  [green]GitHub[/green]: {len(github_urls)} repos with deployment URLs")
+
+        if not no_npm:
+            with console.status("[cyan]Querying npm registry (4 queries)..."):
+                npm_urls = await npm_search()
+            urls.extend(npm_urls)
+            console.print(f"  [green]npm[/green]: {len(npm_urls)} packages with deployment URLs")
 
         # Deduplicate preserving first-seen order
         urls = list(dict.fromkeys(urls))

@@ -9,35 +9,50 @@ CRTSH_KEYWORDS = ["mcp", "mcp-server", "modelcontext", "llm-server"]
 HF_QUERIES = ["mcp-server", "mcp server", "model-context-protocol", "mcp tool"]
 _HF_PAGE_SIZE = 500
 _HF_MAX_PAGES = 10  # safety cap: 5 000 results per query max
+_USER_AGENT = "petrel/0.3.0 (security research)"
+_CRTSH_RETRIES = 2  # up to 3 total attempts per keyword
 
 
 async def crtsh_search(keywords: list[str] | None = None) -> list[str]:
     """Search certificate transparency logs across multiple keywords.
 
     No domain-name filtering — fingerprinting confirms if it's actually MCP.
+    Retries up to 2 times on timeout or 429.
     """
     if keywords is None:
         keywords = CRTSH_KEYWORDS
 
-    async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
+    async with httpx.AsyncClient(
+        timeout=60.0,
+        follow_redirects=True,
+        headers={"User-Agent": _USER_AGENT},
+    ) as client:
 
         async def _fetch(kw: str) -> set[str]:
-            try:
-                resp = await client.get(
-                    "https://crt.sh/",
-                    params={"q": kw, "output": "json"},
-                )
-                if resp.status_code != 200:
+            for attempt in range(_CRTSH_RETRIES + 1):
+                try:
+                    resp = await client.get(
+                        "https://crt.sh/",
+                        params={"q": kw, "output": "json"},
+                    )
+                    if resp.status_code == 429 and attempt < _CRTSH_RETRIES:
+                        await asyncio.sleep(5.0)
+                        continue
+                    if resp.status_code != 200:
+                        return set()
+                    found: set[str] = set()
+                    for entry in resp.json():
+                        for domain in entry.get("name_value", "").split("\n"):
+                            domain = domain.strip().lstrip("*.")
+                            if domain and "." in domain:
+                                found.add(domain)
+                    return found
+                except (httpx.TimeoutException, httpx.NetworkError):
+                    if attempt < _CRTSH_RETRIES:
+                        await asyncio.sleep(2.0**attempt)
+                        continue
                     return set()
-                found: set[str] = set()
-                for entry in resp.json():
-                    for domain in entry.get("name_value", "").split("\n"):
-                        domain = domain.strip().lstrip("*.")
-                        if domain and "." in domain:
-                            found.add(domain)
-                return found
-            except Exception:
-                return set()
+            return set()
 
         all_domains: set[str] = set()
         for i, kw in enumerate(keywords):
