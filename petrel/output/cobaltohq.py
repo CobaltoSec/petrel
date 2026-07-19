@@ -1,10 +1,10 @@
-"""CobaltoHQ integration — emit petrel.server.critical events for CRITICAL MCP servers."""
+"""CobaltoHQ integration — emit petrel.server.critical/high events for high-risk MCP servers."""
 from __future__ import annotations
 from ..models import MCPServerRecord, RiskTier
 
 
 def emit_critical_servers(records: list[MCPServerRecord]) -> int:
-    """Emit petrel.server.critical events for each CRITICAL server found.
+    """Emit petrel.server.{critical,high} events for CRITICAL and HIGH servers.
 
     Requires cobaltosec-hub to be installed. Silently no-ops if not available.
     Returns the number of events emitted.
@@ -16,16 +16,16 @@ def emit_critical_servers(records: list[MCPServerRecord]) -> int:
 
     emitted = 0
     for rec in records:
-        if rec.risk_tier != RiskTier.CRITICAL:
+        if rec.risk_tier not in (RiskTier.CRITICAL, RiskTier.HIGH):
             continue
         try:
             emit(
-                "petrel.server.critical",
+                f"petrel.server.{rec.risk_tier.value.lower()}",
                 {
                     "url": rec.url,
                     "protocol": rec.protocol.value,
                     "auth": rec.auth_state.value,
-                    "tools": [t.name for t in rec.tools if t.risk_tier == RiskTier.CRITICAL],
+                    "tools": [t.name for t in rec.tools if t.risk_tier in (RiskTier.CRITICAL, RiskTier.HIGH)],
                     "risk_reasons": rec.risk_reasons,
                     "discovered_via": rec.discovered_via,
                 },

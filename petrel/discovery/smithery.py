@@ -4,7 +4,7 @@ import httpx
 
 _API = "https://smithery.ai/api/v1/servers"
 _PAGE_SIZE = 100
-_USER_AGENT = "petrel/0.4.0 (security research)"
+_USER_AGENT = "petrel/0.5.0 (security research)"
 _SKIP_HOSTS = frozenset([
     "github.com", "github.io", "gitlab.com", "npmjs.com",
     "npmjs.org", "pypi.org", "docs.", "discord.com",
@@ -17,14 +17,25 @@ def _is_deployment_url(url: str) -> bool:
     return not any(skip in url for skip in _SKIP_HOSTS)
 
 
-async def smithery_search() -> list[str]:
-    """Paginate Smithery.ai registry, extract deployment URLs."""
+async def smithery_search(api_key: str | None = None) -> list[str]:
+    """Paginate Smithery.ai registry, extract deployment URLs.
+
+    Requires SMITHERY_API_KEY for full access (~6,756 servers).
+    Without key: returns [] (API requires authentication).
+    """
+    import os
+    key = api_key or os.getenv("SMITHERY_API_KEY")
+
+    headers = {"User-Agent": _USER_AGENT}
+    if key:
+        headers["Authorization"] = f"Bearer {key}"
+
     urls: list[str] = []
     page = 1
     async with httpx.AsyncClient(
         timeout=30.0,
         follow_redirects=True,
-        headers={"User-Agent": _USER_AGENT},
+        headers=headers,
     ) as client:
         while True:
             try:
@@ -32,6 +43,17 @@ async def smithery_search() -> list[str]:
                     _API,
                     params={"page": page, "pageSize": _PAGE_SIZE},
                 )
+                if resp.status_code in (401, 403):
+                    import sys
+                    print(
+                        "[warn] Smithery: authentication required — set SMITHERY_API_KEY env var",
+                        file=sys.stderr,
+                    )
+                    break
+                if resp.status_code == 429:
+                    import asyncio
+                    await asyncio.sleep(10.0)
+                    continue
                 if resp.status_code != 200:
                     break
                 data = resp.json()
@@ -39,7 +61,6 @@ async def smithery_search() -> list[str]:
                 if not servers:
                     break
                 for s in servers:
-                    # Try fields in priority order
                     for field in ("homepage", "deploymentUrl", "url"):
                         raw = (s.get(field) or "").strip()
                         if _is_deployment_url(raw):

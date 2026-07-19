@@ -63,3 +63,49 @@ async def test_smithery_empty_servers_stops_pagination(httpx_mock: HTTPXMock):
     httpx_mock.add_response(url=_URL, json={"servers": [], "total": 0})
     urls = await smithery_search()
     assert urls == []
+
+
+# ---------------------------------------------------------------------------
+# DISC-001: API key support
+# ---------------------------------------------------------------------------
+
+def _make_smithery_resp(status, data=None):
+    from unittest.mock import MagicMock
+    resp = MagicMock()
+    resp.status_code = status
+    resp.json = lambda: data or {}
+    return resp
+
+
+@pytest.mark.asyncio
+async def test_smithery_401_returns_empty_and_warns(capsys):
+    from unittest.mock import AsyncMock, patch, MagicMock
+    with patch("httpx.AsyncClient") as mock_client_cls:
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.get = AsyncMock(return_value=_make_smithery_resp(401))
+        mock_client_cls.return_value = mock_client
+        result = await smithery_search(api_key=None)
+    assert result == []
+    captured = capsys.readouterr()
+    assert "SMITHERY_API_KEY" in captured.err
+
+
+@pytest.mark.asyncio
+async def test_smithery_with_key_sends_bearer_header():
+    from unittest.mock import AsyncMock, patch
+
+    async def fake_get(url, **kwargs):
+        return _make_smithery_resp(200, {"servers": [], "total": 0})
+
+    with patch("httpx.AsyncClient") as mock_client_cls:
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.get = fake_get
+        mock_client_cls.return_value = mock_client
+        await smithery_search(api_key="test-key-123")
+    # Authorization header was passed to AsyncClient constructor
+    init_kwargs = mock_client_cls.call_args[1]
+    assert init_kwargs.get("headers", {}).get("Authorization") == "Bearer test-key-123"

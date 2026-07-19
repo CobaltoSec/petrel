@@ -71,7 +71,7 @@ def records_to_sarif(records: list[MCPServerRecord]) -> dict:
             "tool": {
                 "driver": {
                     "name": "petrel",
-                    "version": "0.4.0",
+                    "version": "0.5.0",
                     "informationUri": "https://github.com/CobaltoSec/petrel",
                     "rules": rules,
                 }

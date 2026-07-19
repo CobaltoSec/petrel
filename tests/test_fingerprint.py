@@ -408,3 +408,68 @@ async def test_f5_probe_batch_source_map_fallback(httpx_mock: HTTPXMock):
     record = results[0]
     assert record is not None
     assert record.discovered_via == "probe"
+
+
+# ---------------------------------------------------------------------------
+# FP-002, FP-003, FP-001 — fingerprint false-positive fixes
+# ---------------------------------------------------------------------------
+
+from unittest.mock import AsyncMock, MagicMock
+
+
+def _make_resp(status, body=None, headers=None):
+    """Helper: mock httpx.Response."""
+    resp = MagicMock()
+    resp.status_code = status
+    resp.headers = headers or {}
+    resp.json = lambda: body or {}
+    resp.url = "https://example.com/mcp"
+    resp.history = []
+    return resp
+
+
+@pytest.mark.asyncio
+async def test_fp002_protocolversion_without_serverinfo():
+    """Server con protocolVersion pero sin serverInfo debe ser confirmado."""
+    from petrel.fingerprint.probe import _probe_streamable
+
+    body = {"result": {"protocolVersion": "2024-11-05", "capabilities": {}}}
+    resp = _make_resp(200, body)
+
+    client = AsyncMock()
+    client.post = AsyncMock(return_value=resp)
+
+    record = await _probe_streamable("https://example.com", client)
+    assert record is not None
+    assert record.protocol.value == "streamable-http"
+    assert record.server_name is None  # serverInfo ausente → None
+
+
+@pytest.mark.asyncio
+async def test_fp003_403_returns_auth_required():
+    """403 Forbidden debe crear record con AuthState.REQUIRED."""
+    from petrel.fingerprint.probe import _probe_streamable
+
+    resp = _make_resp(403, headers={})
+    client = AsyncMock()
+    client.post = AsyncMock(return_value=resp)
+
+    record = await _probe_streamable("https://example.com", client)
+    assert record is not None
+    assert record.auth_state.value == "required"
+
+
+@pytest.mark.asyncio
+async def test_fp001_jsonrpc_error_returns_partial_record():
+    """JSON-RPC error response = endpoint MCP confirmado."""
+    from petrel.fingerprint.probe import _probe_streamable
+
+    body = {"jsonrpc": "2.0", "id": 1, "error": {"code": -32602, "message": "Invalid params"}}
+    resp = _make_resp(200, body)
+    client = AsyncMock()
+    client.post = AsyncMock(return_value=resp)
+
+    record = await _probe_streamable("https://example.com", client)
+    assert record is not None
+    assert record.is_confirmed_mcp is True
+    assert record.protocol.value == "streamable-http"

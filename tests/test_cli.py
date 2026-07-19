@@ -289,3 +289,81 @@ def test_feed_corvus_fallback_to_mcp_when_no_path(tmp_path: Path):
     assert result.exit_code == 0, result.output
     # URL in YAML output should end with /mcp
     assert "/mcp" in result.output
+
+
+# ---------------------------------------------------------------------------
+# SR-02: no-auth tag solo cuando auth_state == "none"
+# ---------------------------------------------------------------------------
+
+def test_sr02_no_auth_tag_only_when_auth_none(tmp_path: Path):
+    import yaml
+
+    records = [
+        {"url": "https://a.com", "protocol": "streamable-http", "risk_tier": "CRITICAL",
+         "auth_state": "bearer", "discovered_via": "github", "tools": [], "risk_reasons": [],
+         "endpoint_path": "/mcp", "final_url": None, "resources": [], "prompts": [],
+         "platform": "unknown", "behind_cloudflare": False, "server_capabilities": {},
+         "server_instructions": None, "server_name": None, "server_version": None,
+         "protocol_version": None, "redirect_count": 0, "scanned_at": "2026-01-01T00:00:00+00:00"},
+        {"url": "https://b.com", "protocol": "streamable-http", "risk_tier": "HIGH",
+         "auth_state": "none", "discovered_via": "github", "tools": [], "risk_reasons": [],
+         "endpoint_path": "/mcp", "final_url": None, "resources": [], "prompts": [],
+         "platform": "unknown", "behind_cloudflare": False, "server_capabilities": {},
+         "server_instructions": None, "server_name": None, "server_version": None,
+         "protocol_version": None, "redirect_count": 0, "scanned_at": "2026-01-01T00:00:00+00:00"},
+    ]
+    jsonl = _make_jsonl(tmp_path, records)
+    out = tmp_path / "targets.yaml"
+
+    result = runner.invoke(app, ["feed-corvus", str(jsonl), "--output", str(out)])
+    assert result.exit_code == 0, result.output
+
+    data = yaml.safe_load(out.read_text())
+    targets = {t["url"].split("/mcp")[0].replace("https://", ""): t for t in data["targets"]}
+
+    # a.com tiene bearer auth — NO debe tener no-auth tag
+    a_tags = targets.get("a.com", {}).get("tags", [])
+    assert "no-auth" not in a_tags, f"Bearer server should not have no-auth tag: {a_tags}"
+
+    # b.com tiene auth_state=none — SÍ debe tener no-auth tag
+    b_tags = targets.get("b.com", {}).get("tags", [])
+    assert "no-auth" in b_tags, f"No-auth server should have no-auth tag: {b_tags}"
+
+
+# ---------------------------------------------------------------------------
+# SR-04: risk_tier presente en todas las entradas + CRITICAL primero
+# ---------------------------------------------------------------------------
+
+def test_sr04_risk_tier_present_and_sorted(tmp_path: Path):
+    import yaml
+
+    records = [
+        {"url": "https://low.com", "protocol": "streamable-http", "risk_tier": "LOW",
+         "auth_state": "bearer", "discovered_via": "github", "tools": [], "risk_reasons": [],
+         "endpoint_path": "/mcp", "final_url": None, "resources": [], "prompts": [],
+         "platform": "unknown", "behind_cloudflare": False, "server_capabilities": {},
+         "server_instructions": None, "server_name": None, "server_version": None,
+         "protocol_version": None, "redirect_count": 0, "scanned_at": "2026-01-01T00:00:00+00:00"},
+        {"url": "https://critical.com", "protocol": "streamable-http", "risk_tier": "CRITICAL",
+         "auth_state": "none", "discovered_via": "github", "tools": [], "risk_reasons": [],
+         "endpoint_path": "/mcp", "final_url": None, "resources": [], "prompts": [],
+         "platform": "unknown", "behind_cloudflare": False, "server_capabilities": {},
+         "server_instructions": None, "server_name": None, "server_version": None,
+         "protocol_version": None, "redirect_count": 0, "scanned_at": "2026-01-01T00:00:00+00:00"},
+    ]
+    jsonl = _make_jsonl(tmp_path, records)
+    out = tmp_path / "targets.yaml"
+
+    result = runner.invoke(app, ["feed-corvus", str(jsonl), "--output", str(out)])
+    assert result.exit_code == 0, result.output
+
+    data = yaml.safe_load(out.read_text())
+    targets = data["targets"]
+
+    # risk_tier presente en todas las entradas
+    for t in targets:
+        assert "risk_tier" in t, f"risk_tier missing from entry: {t}"
+
+    # CRITICAL va primero
+    assert targets[0]["risk_tier"] == "CRITICAL"
+    assert targets[1]["risk_tier"] == "LOW"

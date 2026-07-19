@@ -128,7 +128,7 @@ async def _probe_streamable(url: str, client: httpx.AsyncClient) -> MCPServerRec
                 endpoint,
                 json=_INITIALIZE,
                 headers={"Accept": "application/json, text/event-stream"},
-                timeout=8.0,
+                timeout=httpx.Timeout(connect=3.0, read=8.0, write=5.0, pool=5.0),
             )
         except httpx.RequestError:
             continue
@@ -136,12 +136,12 @@ async def _probe_streamable(url: str, client: httpx.AsyncClient) -> MCPServerRec
         behind_cf = "cf-ray" in resp.headers
         platform = _detect_platform(resp, url)
 
-        if resp.status_code == 401:
+        if resp.status_code in (401, 403):
             detected = _detect_auth(resp, url)
             return MCPServerRecord(
                 url=url,
                 protocol=Protocol.STREAMABLE_HTTP,
-                auth_state=detected if detected != AuthState.NONE else AuthState.REQUIRED,
+                auth_state=detected if detected not in (AuthState.NONE, AuthState.UNKNOWN) else AuthState.REQUIRED,
                 behind_cloudflare=behind_cf,
                 platform=platform,
             )
@@ -155,10 +155,22 @@ async def _probe_streamable(url: str, client: httpx.AsyncClient) -> MCPServerRec
             continue
 
         result = data.get("result", {})
-        if "serverInfo" not in result:
+
+        # FP-001: JSON-RPC error = server is live MCP endpoint (invalid params, not implemented, etc.)
+        if "error" in data and "result" not in data:
+            return MCPServerRecord(
+                url=url,
+                protocol=Protocol.STREAMABLE_HTTP,
+                auth_state=_detect_auth(resp, url),
+                behind_cloudflare=behind_cf,
+                platform=platform,
+                endpoint_path=path,
+            )
+
+        if "protocolVersion" not in result:
             continue
 
-        info = result["serverInfo"]
+        info = result.get("serverInfo", {})
         auth = _detect_auth(resp, url)
 
         final_url_str = str(resp.url)
@@ -193,7 +205,7 @@ async def _probe_sse(url: str, client: httpx.AsyncClient) -> MCPServerRecord | N
     for path in _SSE_PATHS:
         endpoint = f"{url}{path}"
         try:
-            async with client.stream("GET", endpoint, timeout=5.0) as resp:
+            async with client.stream("GET", endpoint, timeout=httpx.Timeout(connect=3.0, read=5.0, write=5.0, pool=5.0)) as resp:
                 ct = resp.headers.get("content-type", "")
                 if not ct.startswith("text/event-stream"):
                     continue
@@ -223,7 +235,7 @@ async def _probe_sse(url: str, client: httpx.AsyncClient) -> MCPServerRecord | N
                 )
                 msg_endpoint = url + session_path
                 try:
-                    init_resp = await client.post(msg_endpoint, json=_INITIALIZE, timeout=5.0)
+                    init_resp = await client.post(msg_endpoint, json=_INITIALIZE, timeout=httpx.Timeout(connect=3.0, read=5.0, write=5.0, pool=5.0))
                     if init_resp.status_code == 200:
                         data = init_resp.json()
                         result = data.get("result", {})
@@ -250,7 +262,7 @@ async def _probe_sse(url: str, client: httpx.AsyncClient) -> MCPServerRecord | N
 
 async def _get_tools(endpoint: str, client: httpx.AsyncClient) -> list[MCPTool]:
     try:
-        resp = await client.post(endpoint, json=_TOOLS_LIST, timeout=8.0)
+        resp = await client.post(endpoint, json=_TOOLS_LIST, timeout=httpx.Timeout(connect=3.0, read=8.0, write=5.0, pool=5.0))
         if resp.status_code != 200:
             return []
         data = resp.json()
@@ -270,7 +282,7 @@ async def _get_tools(endpoint: str, client: httpx.AsyncClient) -> list[MCPTool]:
 
 async def _get_resources(endpoint: str, client: httpx.AsyncClient) -> list[MCPResource]:
     try:
-        resp = await client.post(endpoint, json=_RESOURCES_LIST, timeout=8.0)
+        resp = await client.post(endpoint, json=_RESOURCES_LIST, timeout=httpx.Timeout(connect=3.0, read=8.0, write=5.0, pool=5.0))
         if resp.status_code != 200:
             return []
         data = resp.json()
@@ -291,7 +303,7 @@ async def _get_resources(endpoint: str, client: httpx.AsyncClient) -> list[MCPRe
 
 async def _get_prompts(endpoint: str, client: httpx.AsyncClient) -> list[MCPPrompt]:
     try:
-        resp = await client.post(endpoint, json=_PROMPTS_LIST, timeout=8.0)
+        resp = await client.post(endpoint, json=_PROMPTS_LIST, timeout=httpx.Timeout(connect=3.0, read=8.0, write=5.0, pool=5.0))
         if resp.status_code != 200:
             return []
         data = resp.json()

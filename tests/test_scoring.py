@@ -458,3 +458,78 @@ def test_s6_bearer_auth_no_api_key_reason():
     )
     result = score_server(record)
     assert not any("URL query parameters" in r for r in result.risk_reasons)
+
+
+# ---------------------------------------------------------------------------
+# SR-03 — query param FP calibration
+# ---------------------------------------------------------------------------
+
+def test_sr03_query_param_not_critical():
+    from petrel.scoring.risk import score_tool
+    from petrel.models import MCPTool, RiskTier
+    tool = MCPTool(
+        name="search_knowledge",
+        description="Search the knowledge base",
+        inputSchema={"type": "object", "properties": {"query": {"type": "string"}}},
+    )
+    tier = score_tool(tool)
+    assert tier != RiskTier.CRITICAL, f"search_knowledge(query: str) should not be CRITICAL, got {tier}"
+    assert tier in (RiskTier.HIGH, RiskTier.MEDIUM, RiskTier.LOW)
+
+
+def test_sr03_sql_param_still_critical():
+    from petrel.scoring.risk import score_tool
+    from petrel.models import MCPTool, RiskTier
+    tool = MCPTool(
+        name="run_query",
+        inputSchema={"type": "object", "properties": {"sql": {"type": "string"}}},
+    )
+    assert score_tool(tool) == RiskTier.CRITICAL
+
+
+# ---------------------------------------------------------------------------
+# SR-01 — FS_READ + NETWORK/MESSAGING cluster
+# ---------------------------------------------------------------------------
+
+def test_sr01_fs_read_network_cluster_critical():
+    from petrel.scoring.risk import score_server
+    from petrel.models import MCPServerRecord, MCPTool, Protocol, AuthState, RiskTier
+    record = MCPServerRecord(
+        url="https://example.com",
+        protocol=Protocol.STREAMABLE_HTTP,
+        auth_state=AuthState.NONE,
+        tools=[
+            MCPTool(name="read_file"),
+            MCPTool(name="fetch_url"),
+        ],
+    )
+    scored = score_server(record)
+    assert scored.risk_tier == RiskTier.CRITICAL
+    assert any("exfiltration cluster" in r for r in scored.risk_reasons)
+
+
+def test_sr01_fs_read_messaging_cluster_critical():
+    from petrel.scoring.risk import score_server
+    from petrel.models import MCPServerRecord, MCPTool, Protocol, AuthState, RiskTier
+    record = MCPServerRecord(
+        url="https://example.com",
+        protocol=Protocol.STREAMABLE_HTTP,
+        auth_state=AuthState.NONE,
+        tools=[
+            MCPTool(name="read_file"),
+            MCPTool(name="send_email"),
+        ],
+    )
+    scored = score_server(record)
+    assert scored.risk_tier == RiskTier.CRITICAL
+    assert any("exfiltration cluster" in r for r in scored.risk_reasons)
+
+
+def test_sr01_fs_write_network_cluster_high():
+    from petrel.scoring.risk import _detect_clusters
+    from petrel.models import MCPTool, RiskTier
+    tools = [MCPTool(name="write_file"), MCPTool(name="fetch_url")]
+    findings = _detect_clusters(tools)
+    tiers = [f[0] for f in findings]
+    assert RiskTier.HIGH in tiers or RiskTier.CRITICAL in tiers
+    assert any("supply-chain" in f[1] for f in findings)

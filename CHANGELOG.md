@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-07-19
+
+### Added
+- Discovery: Smithery.ai — `SMITHERY_API_KEY` env var + `Authorization: Bearer` header; sin key → warning + 0 resultados (antes: siempre 0 en silencio). Acceso a ~6,756 servers (DISC-001)
+- Discovery: crt.sh keyword `mcp` — pre-filtro por sufijos de plataformas conocidas (`.hf.space`, `.vercel.app`, `.railway.app`, etc.) y tokens MCP en subdominio. Reduce ruido drásticamente (DISC-004)
+- Fingerprint: JSON-RPC error responses (`"error"` en body) registrados como endpoints MCP confirmados, no descartados (FP-001)
+- Fingerprint: `403 Forbidden` → `AuthState.REQUIRED` (antes solo 401). Cubre Cloudflare Access y API gateways (FP-003)
+- Output: `cobaltohq.py` — emite `petrel.server.critical` y `petrel.server.high` events (antes solo CRITICAL). Event name dinámico (F-02)
+- CLI: `feed-corvus` — tag `no-auth` solo cuando `auth_state == "none"` (antes hardcodeado en todo CRITICAL/HIGH). `risk_tier` en todas las entradas. Sort CRITICAL-first en `targets.yaml` (SR-02, F-01, SR-04)
+- 16 nuevos tests (161 → 177, todos passing)
+
+### Fixed
+- Fingerprint: guard `"serverInfo" not in result` → `"protocolVersion" not in result`. Servers MCP que omiten `serverInfo` (válido por spec) ya no son descartados (FP-002)
+- Scoring: `query` movido de `_SCHEMA_HIGH_PARAMS` a `_SCHEMA_MEDIUM_PARAMS` — `search_knowledge(query: str)` ya no escala a CRITICAL (SR-03)
+- Scoring: clusters FS_READ+NETWORK y FS_READ+MESSAGING → CRITICAL (exfiltración). FS_WRITE+NETWORK → HIGH (supply-chain). Antes faltaban (SR-01)
+- Discovery: Censys/FOFA query → `"2024-11-05"` (string exclusivo del protocolo MCP). Antes usaba `"serverInfo"/"protocolVersion"` genéricos (DISC-003)
+- Performance: timeout split `connect=3s / read=8s` en todos los probes (antes: 8s plano). Ahorra 5s por path en hosts non-MCP (PERF-03)
+- test_fofa: actualiza assert a `"2024-11-05"` tras cambio de query (DISC-003)
+
 ## [0.4.0] — 2026-07-18
 
 ### Added

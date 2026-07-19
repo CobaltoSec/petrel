@@ -6,7 +6,7 @@ import os
 import httpx
 
 _API = "https://fofa.info/api/v1/search/all"
-_QUERY = 'body="serverInfo" && body="protocolVersion"'
+_QUERY = 'body="2024-11-05"'
 
 
 async def fofa_search(max_results: int = 500) -> list[str]:

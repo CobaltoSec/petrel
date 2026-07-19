@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 
 import httpx
 
@@ -11,6 +12,30 @@ _HF_PAGE_SIZE = 500
 _HF_MAX_PAGES = 10  # safety cap: 5 000 results per query max
 _USER_AGENT = "petrel/0.3.0 (security research)"
 _CRTSH_RETRIES = 2  # up to 3 total attempts per keyword
+
+_MCP_PLATFORM_SUFFIXES = (
+    ".hf.space", ".vercel.app", ".railway.app", ".onrender.com",
+    ".fly.dev", ".fly.io", ".modal.run", ".replit.dev",
+    ".workers.dev", ".netlify.app", ".render.com", ".glitch.me",
+    ".modal.run", ".amazonaws.com", ".run.app", ".cloudfunctions.net",
+)
+
+
+def _is_likely_mcp_domain(domain: str) -> bool:
+    """Return True if domain looks like a real MCP server deployment.
+
+    Applied only to the generic 'mcp' keyword to reduce noise from
+    consulting firms, certifications, and media protocols.
+    """
+    d = domain.lower()
+    if any(d.endswith(s) for s in _MCP_PLATFORM_SUFFIXES):
+        return True
+    # "modelcontext" or "model-context" anywhere in the domain
+    if re.search(r'(?:modelcontext|model-context)', d):
+        return True
+    # "mcp" as a complete dot-separated label, or as an interior hyphen-token
+    # (not as a trailing hyphen suffix directly before the TLD dot)
+    return bool(re.search(r'(?:^|\.)mcp[\.\-]|(?:-)mcp-', d))
 
 
 async def crtsh_search(keywords: list[str] | None = None) -> list[str]:
@@ -59,6 +84,10 @@ async def crtsh_search(keywords: list[str] | None = None) -> list[str]:
             if i > 0:
                 await asyncio.sleep(1.0)  # avoid crt.sh rate limiting
             found = await _fetch(kw)
+            # Pre-filter generic 'mcp' keyword: only keep domains that look like MCP deployments
+            if kw == "mcp":
+                before_filter = len(found)
+                found = {d for d in found if _is_likely_mcp_domain(d)}
             all_domains.update(found)
         return sorted(all_domains)
 

@@ -5,7 +5,7 @@ import httpx
 
 _SIMPLE_URL = "https://pypi.org/simple/"
 _PKG_JSON_URL = "https://pypi.org/pypi/{}/json"
-_USER_AGENT = "petrel/0.4.0 (security research)"
+_USER_AGENT = "petrel/0.5.0 (security research)"
 _MCP_SUBSTRINGS = ["mcp-", "-mcp", "mcp_", "_mcp", "modelcontext", "model-context"]
 _SKIP_HOSTS = frozenset([
     "github.com", "github.io", "gitlab.com",

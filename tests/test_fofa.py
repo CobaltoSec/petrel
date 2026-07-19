@@ -61,5 +61,4 @@ async def test_fofa_encodes_query_as_base64(httpx_mock: HTTPXMock, monkeypatch):
     assert len(reqs) == 1
     qb64 = reqs[0].url.params.get("qbase64", "")
     decoded = base64.b64decode(qb64).decode()
-    assert "serverInfo" in decoded
-    assert "protocolVersion" in decoded
+    assert "2024-11-05" in decoded

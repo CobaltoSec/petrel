@@ -16,16 +16,20 @@ from petrel.discovery.passive import crtsh_search, hf_spaces_search
 
 @pytest.mark.asyncio
 async def test_crtsh_no_domain_filter(httpx_mock: HTTPXMock):
-    """D2b: domains without the keyword in their name are still returned."""
+    """D2b: domains without the keyword in their name are still returned.
+
+    Uses 'mcp-server' keyword (not subject to DISC-004 pre-filter) to verify
+    that crt.sh results are returned regardless of keyword presence in domain name.
+    """
     httpx_mock.add_response(
         url=re.compile(r"https://crt\.sh/"),
         json=[
             {"name_value": "mcp-server.example.com"},
-            {"name_value": "tools.example.com"},  # no "mcp" in name
+            {"name_value": "tools.example.com"},  # no keyword in name
         ],
         is_reusable=True,
     )
-    results = await crtsh_search(["mcp"])
+    results = await crtsh_search(["mcp-server"])
     assert "tools.example.com" in results
     assert "mcp-server.example.com" in results
 
@@ -48,7 +52,8 @@ async def test_crtsh_strips_wildcard_prefix(httpx_mock: HTTPXMock):
         json=[{"name_value": "*.wildcard.io\nregular.io"}],
         is_reusable=True,
     )
-    results = await crtsh_search(["mcp"])
+    # Use 'mcp-server' keyword — not subject to DISC-004 pre-filter
+    results = await crtsh_search(["mcp-server"])
     assert "wildcard.io" in results
     assert "*.wildcard.io" not in results
 
@@ -152,7 +157,8 @@ async def test_crtsh_retries_on_read_timeout(httpx_mock: HTTPXMock, monkeypatch)
         url=re.compile(r"https://crt\.sh/"),
         json=[{"name_value": "ok.example.com"}],
     )
-    results = await crtsh_search(["mcp"])
+    # Use 'mcp-server' keyword — not subject to DISC-004 pre-filter
+    results = await crtsh_search(["mcp-server"])
     assert "ok.example.com" in results
 
 
@@ -216,3 +222,38 @@ async def test_censys_api_error_returns_empty(httpx_mock: HTTPXMock, monkeypatch
 
     result = await censys_search()
     assert result == []
+
+
+# DISC-004: crt.sh domain pre-filter for 'mcp' keyword
+def test_disc004_mcp_keyword_filter_platform_domains():
+    from petrel.discovery.passive import _is_likely_mcp_domain
+    # Plataformas conocidas de deployment → pasan
+    assert _is_likely_mcp_domain("my-mcp-server.vercel.app") is True
+    assert _is_likely_mcp_domain("cool-tool.hf.space") is True
+    assert _is_likely_mcp_domain("api.railway.app") is True
+    assert _is_likely_mcp_domain("service.fly.dev") is True
+    assert _is_likely_mcp_domain("something.onrender.com") is True
+
+def test_disc004_mcp_keyword_filter_mcp_token_domains():
+    from petrel.discovery.passive import _is_likely_mcp_domain
+    # Dominio o subdominio contiene "mcp" como token → pasan
+    assert _is_likely_mcp_domain("mcp.example.com") is True
+    assert _is_likely_mcp_domain("my-mcp-tool.com") is True
+    assert _is_likely_mcp_domain("modelcontext.io") is True
+    assert _is_likely_mcp_domain("model-context-server.com") is True
+
+def test_disc004_mcp_keyword_filter_rejects_noise():
+    from petrel.discovery.passive import _is_likely_mcp_domain
+    # Noise típico del keyword "mcp" → rechazados
+    assert _is_likely_mcp_domain("mcpconsulting.co") is False
+    assert _is_likely_mcp_domain("mcpartners.com") is False
+    assert _is_likely_mcp_domain("mediacontrolprotocol.net") is False
+    assert _is_likely_mcp_domain("randomcorp-mcp.biz") is False
+
+def test_disc004_other_keywords_not_filtered():
+    """Keywords como 'modelcontext' y 'mcp-server' no deben ser filtrados."""
+    from petrel.discovery.passive import _is_likely_mcp_domain
+    # Estos pasan igual porque el filtro solo se aplica al keyword "mcp"
+    # Para probar el comportamiento del loop, solo verificamos la función helper
+    # ya que el loop necesita un mock de httpx
+    assert _is_likely_mcp_domain("modelcontextprotocol.io") is True

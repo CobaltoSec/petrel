@@ -6,10 +6,7 @@ import os
 import httpx
 
 _API = "https://search.censys.io/api/v2"
-_QUERY = (
-    'services.http.response.body: "serverInfo" '
-    'and services.http.response.body: "protocolVersion"'
-)
+_QUERY = 'services.http.response.body: "2024-11-05"'
 
 
 async def censys_search(max_results: int = 100) -> list[str]:

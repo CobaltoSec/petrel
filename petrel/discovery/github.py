@@ -7,7 +7,7 @@ import os
 import httpx
 
 _API_BASE = "https://api.github.com"
-_USER_AGENT = "petrel/0.4.0 (security research)"
+_USER_AGENT = "petrel/0.5.0 (security research)"
 
 GITHUB_QUERIES = [
     "topic:mcp-server",

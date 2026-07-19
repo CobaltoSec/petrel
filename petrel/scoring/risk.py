@@ -38,8 +38,8 @@ def _score_from_description(desc: str | None) -> RiskTier:
 # S2 — inputSchema parameter name scoring
 # ---------------------------------------------------------------------------
 _SCHEMA_CRITICAL_PARAMS = frozenset(["command", "cmd", "shell", "bash", "exec", "evaluate"])
-_SCHEMA_HIGH_PARAMS = frozenset(["code", "script", "payload", "expression", "query", "sql", "program"])
-_SCHEMA_MEDIUM_PARAMS = frozenset(["path", "filename", "filepath", "file_path", "template", "url", "uri"])
+_SCHEMA_HIGH_PARAMS = frozenset(["code", "script", "payload", "expression", "sql", "program"])
+_SCHEMA_MEDIUM_PARAMS = frozenset(["path", "filename", "filepath", "file_path", "template", "url", "uri", "query"])
 
 
 def _is_unconstrained_string(prop_schema: dict) -> bool:
@@ -109,6 +109,12 @@ def _detect_clusters(tools: list) -> list[tuple[RiskTier, str]]:
         findings.append((RiskTier.CRITICAL, f"exfiltration cluster: exec={exec_hits} + network={net_hits}"))
     if exec_hits and msg_hits:
         findings.append((RiskTier.CRITICAL, f"exfiltration cluster: exec={exec_hits} + messaging={msg_hits}"))
+    if fs_read_hits and net_hits:
+        findings.append((RiskTier.CRITICAL, f"exfiltration cluster: read={fs_read_hits} + network={net_hits}"))
+    if fs_read_hits and msg_hits:
+        findings.append((RiskTier.CRITICAL, f"exfiltration cluster: read={fs_read_hits} + messaging={msg_hits}"))
+    if fs_write_hits and net_hits:
+        findings.append((RiskTier.HIGH, f"supply-chain cluster: write={fs_write_hits} + network={net_hits}"))
     if len(exec_hits) >= 2:
         findings.append((RiskTier.CRITICAL, f"redundant exec cluster: {exec_hits}"))
     if fs_read_hits and fs_write_hits:

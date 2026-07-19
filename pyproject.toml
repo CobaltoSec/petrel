@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cobaltosec-petrel"
-version = "0.4.0"
+version = "0.5.0"
 description = "MCP Internet Scanner & Fingerprinter — find exposed MCP servers before attackers do"
 readme = "README.md"
 license = {text = "MIT"}

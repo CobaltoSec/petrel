@@ -161,10 +161,15 @@ def discover(
 
         # C7: Smithery
         if not no_smithery:
+            import os as _os
+            _smithery_key = _os.getenv("SMITHERY_API_KEY")
             with console.status("[cyan]Querying Smithery.ai registry (paginated)..."):
-                smithery_urls = await smithery_search()
+                smithery_urls = await smithery_search(api_key=_smithery_key)
             url_sources.extend((u, "smithery") for u in smithery_urls)
-            console.print(f"  [green]Smithery[/green]: {len(smithery_urls)} servers")
+            if _smithery_key:
+                console.print(f"  [green]Smithery[/green]: {len(smithery_urls)} servers")
+            else:
+                console.print(f"  [dim]Smithery[/dim]: {len(smithery_urls)} servers [dim](set SMITHERY_API_KEY for full access ~6,756)[/dim]")
 
         # C7: PyPI
         if not no_pypi:
@@ -261,7 +266,7 @@ def discover(
     from .output.cobaltohq import emit_critical_servers
     n_emitted = emit_critical_servers(records)
     if n_emitted:
-        console.print(f"[dim]CobaltoHQ: {n_emitted} CRITICAL events emitted[/dim]")
+        console.print(f"[dim]CobaltoHQ: {n_emitted} high-risk events emitted[/dim]")
 
 
 # ---------------------------------------------------------------------------
@@ -325,7 +330,7 @@ def scan(
     from .output.cobaltohq import emit_critical_servers
     n_emitted = emit_critical_servers(filtered)
     if n_emitted:
-        console.print(f"[dim]CobaltoHQ: {n_emitted} CRITICAL events emitted[/dim]")
+        console.print(f"[dim]CobaltoHQ: {n_emitted} high-risk events emitted[/dim]")
 
 
 # ---------------------------------------------------------------------------
@@ -396,10 +401,15 @@ def feed_corvus(
 
         name = (r.get("final_url") or r["url"]).removeprefix("https://").removeprefix("http://").replace(".", "-").replace(":", "-")[:48]
         entry: dict = {"name": name, "transport": "http", "url": target_url}
-        if r.get("risk_tier") in ("CRITICAL", "HIGH"):
-            entry["tags"] = [f"petrel-{r['risk_tier'].lower()}", "no-auth"]
+        tags = [f"petrel-{r.get('risk_tier', 'INFO').lower()}"]
+        if r.get("auth_state") == "none":
+            tags.append("no-auth")
+        entry["tags"] = tags
+        entry["risk_tier"] = r.get("risk_tier", "INFO")
         targets.append(entry)
 
+    _TIER_VALUES = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]
+    targets.sort(key=lambda e: _TIER_VALUES.index(e.get("risk_tier", "INFO")))
     doc = {"targets": targets}
     yaml_str = yaml.dump(doc, default_flow_style=False, allow_unicode=True, sort_keys=False)
 
