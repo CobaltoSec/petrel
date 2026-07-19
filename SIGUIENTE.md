@@ -1,74 +1,61 @@
 # Petrel — Siguiente
 
-## Estado: v0.2.0 (2026-07-15) — 33/33 tests ✅
+## Estado: v0.4.0 (2026-07-18) — 161/161 tests ✅
 
 Repo: `github.com/CobaltoSec/petrel` · PyPI: pendiente token
 
 ---
 
-## PETREL-V02 — ✅ CERRADO (2026-07-15)
+## PETREL-V05 — ✅ CERRADO (2026-07-18)
 
-- D1: primer run real — 72 MCP servers confirmados (562 candidates → 72)
-- D2a: HF Spaces — 4 queries + paginación 500/página → 564 spaces
-- D2b: crt.sh — 4 keywords, sequential sleep(1.0), sin doble-encoding
-- D2c: Censys — módulo opcional CENSYS_API_ID/SECRET
+### Implementación v0.4.0 (26 items vía workflow paralelo)
+- Models: Platform enum, MCPResource/MCPPrompt, nuevos fields, worst_tier variadic
+- Discovery: Smithery.ai + PyPI 2-phase + FOFA + GitHub pagination (100→1000)
+- Discovery: source tracking correcto en todos los records (`discovered_via`)
+- Fingerprint: endpoint_path, capabilities, resources/prompts, platform detection, API_KEY auth
+- Scoring: 3 señales (name+desc+schema), clustering, server_name, capabilities, resource URIs
+- Output: sarif.py + html.py + cobaltohq.py
+- CLI: stats, diff, --source/--resume/--since, bugs fixes
 
----
+### Run 2 (2026-07-18)
+- 3,485 candidatos nuevos → 140 MCP servers confirmados
+- 17 CRITICAL sin auth: heym.run, finvestai.top, omi.me, mcp.undisk.app (read_file), glimind.com, +12 más
+- 134 targets → `targets-v05.yaml` → Corvus CS16
 
-## PETREL-V03 — ✅ CERRADO (2026-07-15)
-
-### D3 — `petrel feed-corvus` bridge ✅
-
-Convierte `results.jsonl` → YAML targets para `corvus batch`. Filtra SSE-legacy, agrega `/mcp`.
-
-### D4 — Pipeline Petrel→Corvus Run 1 ✅
-
-12 streamable-http targets → 6 con results (6 ERROR no accesibles):
-- `arsalan-joiya-gmail-mcp-server`: 9 HIGH, score 100/100 — email injection
-- `lambmm-roche-mcp-tools`: 2 HIGH — XHS post injection reflejada en LLM output
-- `galcan-mcp-docs-server`: 1 HIGH — reflected XSS "Chunk X not found"
-- `amirhashmi017` (46 tools): 2 HIGH — scope creep credential fields
-
-**Conclusión:** Todos HF Spaces personales → no califican Ibis GHSA. Material perfecto para Ekoparty case study.
-
-Resultados en: `corvus/case-studies/petrel-run1/results-full/`
+**Tests:** 46 → 161 ✅ **Pool acumulado:** 212 confirmed (72 Run1 + 140 Run2)
 
 ---
 
-## Próximo: PETREL-V04
+## Próximo: PETREL-V06
 
 ### Objetivo
-Active discovery + Shodan para encontrar MCP servers fuera de HuggingFace.
+Publicar PyPI + Smithery API key + Run 3 post-CS16.
 
-### D1 — Shodan integration
-- Query: `http.html:"serverInfo" AND http.html:"protocolVersion"`
-- Alternativa free: `shodan search` CLI (1 query = 100 hosts)
-- Requiere `SHODAN_API_KEY`
+### D1 — PyPI publish (manual — Nico)
+Crear token PyPI scoped a `cobaltosec-petrel` en pypi.org.
+```bash
+python -m build && twine upload dist/cobaltosec_petrel-0.4.0*
+```
 
-### D2 — masscan → petrel probe pipeline
-- Kali: `masscan 0.0.0.0/0 -p 8000-9000 --rate 10000`
-- Filter HTTP → `petrel probe` batch
-- Only for private/authorized nets — lab first
+### D2 — Smithery API key
+Registrarse en smithery.ai para obtener API key gratuita.
+Run 2 retornó 0 resultados — con key: acceso a catálogo completo (~6,756 servers).
+Agregar como `SMITHERY_API_KEY` en la llamada + pasar en header Authorization.
 
-### D3 — crt.sh reliability fix
-- Investigar rate limit permanente vs timeout intermitente
-- Considerar User-Agent header custom
-- Alternativa: `crtsh.com` API endpoint alternativo
+### D3 — Run 3 post-CS16 (operacional)
+Después de Corvus CS16 (auditoría de targets-v05.yaml):
+```bash
+petrel discover --output results-v06.jsonl --since results-v05.jsonl --sarif results-v06.sarif
+petrel diff results-v05.jsonl results-v06.jsonl
+petrel feed-corvus results-v06.jsonl --output targets-v06.yaml --source github
+```
+Foco: plataformas cloud (Vercel/Railway/GCP/Fly) — mayor probabilidad de findings GHSA.
 
-### D4 — Feed Corvus v2: SSE support
-- Corvus batch actualmente solo streamable-http
-- Research: Corvus SSE transport support?
-- Alternativa: petrel feed → direct HTTP probe sin corvus batch
+### D4 — FOFA testing (condicional)
+Si conseguimos FOFA_EMAIL + FOFA_KEY gratuitos: validar cobertura Asian cloud (Alibaba/Tencent/Huawei).
 
-**Talla: M**
-**Dependencias:** Shodan API key opcional (D1), Kali access (D2)
-
----
-
-## Pendiente manual (Nico)
-
-- **PyPI token**: pypi.org → Account Settings → API tokens → scope `cobaltosec-petrel` → update `~/.pypirc` → `python -m build && .venv/Scripts/twine upload dist/*`
-- **Shodan API key**: shodan.io → Account → API key → `SHODAN_API_KEY` en mcp_servers.json
+**Talla: S** (D1+D2 son manuales; D3 operacional)
+**Dependencias:** D3 depende de Corvus CS16
 
 ---
 
@@ -76,6 +63,6 @@ Active discovery + Shodan para encontrar MCP servers fuera de HuggingFace.
 
 | Versión | Foco |
 |---------|------|
-| V04 | Active discovery — Shodan + masscan |
-| V05 | CobaltoHQ: emit `petrel.server.critical` → Telegram alert |
-| V06 | SARIF automático desde pipeline Petrel→Corvus |
+| V06 | PyPI publish + Smithery key + Run 3 post-CS16 |
+| V07 | FOFA cobertura Asian cloud (si creds disponibles) |
+| V08 | `petrel watch` — modo continuo, emite CobaltoHQ on new CRITICAL |

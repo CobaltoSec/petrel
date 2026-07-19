@@ -87,3 +87,32 @@ async def test_github_deduplicates_across_queries(httpx_mock: HTTPXMock, monkeyp
     )
     urls = await github_search(["q1", "q2"])
     assert urls.count("https://shared.hf.space") == 1
+
+
+@pytest.mark.asyncio
+async def test_github_paginates_when_full_page_returned(httpx_mock: HTTPXMock, monkeypatch):
+    import asyncio as _asyncio
+    from unittest.mock import AsyncMock
+    monkeypatch.setattr(_asyncio, "sleep", AsyncMock())
+    full_page = [{"homepage": f"https://server-{i}.railway.app"} for i in range(100)]
+    partial_page = [{"homepage": "https://last-server.vercel.app"}]
+    httpx_mock.add_response(url=_GH_URL, json={"items": full_page})
+    httpx_mock.add_response(url=_GH_URL, json={"items": partial_page})
+    urls = await github_search(["topic:mcp-server"])
+    assert len(urls) == 101
+    assert "https://last-server.vercel.app" in urls
+
+
+@pytest.mark.asyncio
+async def test_github_stops_on_422(httpx_mock: HTTPXMock):
+    httpx_mock.add_response(url=_GH_URL, status_code=422)
+    urls = await github_search(["topic:mcp-server"])
+    assert urls == []
+
+
+@pytest.mark.asyncio
+async def test_github_stops_at_partial_page(httpx_mock: HTTPXMock):
+    items = [{"homepage": f"https://server-{i}.fly.dev"} for i in range(50)]
+    httpx_mock.add_response(url=_GH_URL, json={"items": items})
+    urls = await github_search(["topic:mcp-server"])
+    assert len(urls) == 50

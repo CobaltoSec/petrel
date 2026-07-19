@@ -11,3 +11,6 @@ venv/
 !pyproject.toml
 *.jsonl
 targets-petrel*.yaml
+targets-v*.yaml
+results*.html
+results*.sarif

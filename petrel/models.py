@@ -34,8 +34,41 @@ class RiskTier(str, Enum):
 _TIER_ORDER = [RiskTier.CRITICAL, RiskTier.HIGH, RiskTier.MEDIUM, RiskTier.LOW, RiskTier.INFO]
 
 
-def worst_tier(a: RiskTier, b: RiskTier) -> RiskTier:
-    return a if _TIER_ORDER.index(a) <= _TIER_ORDER.index(b) else b
+def worst_tier(*tiers: RiskTier) -> RiskTier:
+    return min(tiers, key=lambda t: _TIER_ORDER.index(t))
+
+
+class Platform(str, Enum):
+    HUGGINGFACE = "huggingface"
+    VERCEL = "vercel"
+    RAILWAY = "railway"
+    FLY = "fly.io"
+    AWS_LAMBDA = "aws-lambda"
+    GCP = "gcp"
+    AZURE = "azure"
+    CLOUDFLARE_WORKERS = "cloudflare-workers"
+    RENDER = "render"
+    UNKNOWN = "unknown"
+
+
+class MCPResource(BaseModel):
+    uri: str
+    name: str | None = None
+    description: str | None = None
+    mime_type: str | None = Field(default=None, alias="mimeType")
+    model_config = {"populate_by_name": True}
+
+
+class MCPPromptArgument(BaseModel):
+    name: str
+    description: str | None = None
+    required: bool = False
+
+
+class MCPPrompt(BaseModel):
+    name: str
+    description: str | None = None
+    arguments: list[MCPPromptArgument] = []
 
 
 class MCPTool(BaseModel):
@@ -43,6 +76,7 @@ class MCPTool(BaseModel):
     description: str | None = None
     input_schema: dict[str, Any] | None = Field(default=None, alias="inputSchema")
     risk_tier: RiskTier = RiskTier.INFO
+    schema_risk_params: list[str] = []  # dangerous inputSchema param names found by scorer
 
     model_config = {"populate_by_name": True}
 
@@ -60,6 +94,20 @@ class MCPServerRecord(BaseModel):
     risk_reasons: list[str] = []
     behind_cloudflare: bool = False
     scanned_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    # M1 — probe detail
+    endpoint_path: str | None = None
+    server_capabilities: dict[str, Any] = Field(default_factory=dict)
+    server_instructions: str | None = None
+    final_url: str | None = None
+    redirect_count: int = 0
+
+    # M2 — MCP primitives
+    resources: list[MCPResource] = []
+    prompts: list[MCPPrompt] = []
+
+    # M3 — hosting platform
+    platform: Platform = Platform.UNKNOWN
 
     @property
     def is_confirmed_mcp(self) -> bool:

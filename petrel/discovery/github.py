@@ -7,7 +7,7 @@ import os
 import httpx
 
 _API_BASE = "https://api.github.com"
-_USER_AGENT = "petrel/0.3.0 (security research)"
+_USER_AGENT = "petrel/0.4.0 (security research)"
 
 GITHUB_QUERIES = [
     "topic:mcp-server",
@@ -68,21 +68,29 @@ async def github_search(
     ) as client:
 
         async def _fetch_query(query: str) -> list[str]:
-            try:
-                resp = await client.get(
-                    f"{_API_BASE}/search/repositories",
-                    params={"q": query, "sort": "stars", "per_page": 100},
-                )
-                if resp.status_code != 200:
-                    return []
-                urls = []
-                for repo in resp.json().get("items", []):
-                    homepage = (repo.get("homepage") or "").strip()
-                    if _is_deployment_url(homepage):
-                        urls.append(homepage)
-                return urls
-            except Exception:
-                return []
+            urls: list[str] = []
+            for page in range(1, 11):  # GitHub Search: max 10 pages × 100 = 1000 results
+                try:
+                    resp = await client.get(
+                        f"{_API_BASE}/search/repositories",
+                        params={"q": query, "sort": "stars", "per_page": 100, "page": page},
+                    )
+                    if resp.status_code == 422:  # past GitHub's 1000 result limit
+                        break
+                    if resp.status_code != 200:
+                        break
+                    items = resp.json().get("items", [])
+                    for repo in items:
+                        homepage = (repo.get("homepage") or "").strip()
+                        if _is_deployment_url(homepage):
+                            urls.append(homepage)
+                    if len(items) < 100:  # partial page = last page
+                        break
+                    if page < 10:
+                        await asyncio.sleep(delay)  # rate limit between pages
+                except Exception:
+                    break
+            return urls
 
         seen: set[str] = set()
         result: list[str] = []

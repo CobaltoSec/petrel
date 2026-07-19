@@ -2,6 +2,47 @@
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-07-18
+
+### Added
+- Discovery: Smithery.ai MCP registry — paginated, no auth required (`petrel/discovery/smithery.py`)
+- Discovery: PyPI 2-phase — Simple index filter + per-package JSON for deployment URLs (`petrel/discovery/pypi.py`)
+- Discovery: FOFA opcional vía `FOFA_EMAIL` + `FOFA_KEY` para cobertura Asian cloud (`petrel/discovery/fofa.py`)
+- Discovery: GitHub pagination — 100 → 1,000 resultados/query (10 páginas × 100)
+- Discovery: `discovered_via` correctamente propagado a todos los records (crtsh/huggingface/github/npm/smithery/pypi/censys/fofa)
+- Fingerprint: `endpoint_path` guardado — `feed-corvus` ya no hardcodea `/mcp`
+- Fingerprint: `server_capabilities` (sampling/roots) y `server_instructions` extraídos de `initialize`
+- Fingerprint: `resources/list` + `prompts/list` enumerados concurrentemente con `tools/list`
+- Fingerprint: Platform detection — Vercel/Railway/Fly/AWS/GCP/Azure desde response headers + URL patterns
+- Fingerprint: `AuthState.API_KEY` — detecta API key expuesta en URL query params
+- Scoring: 3 señales por tool: nombre + descripción + inputSchema params
+- Scoring: Tool clustering — exec+network/exec+messaging → CRITICAL exfiltration combo
+- Scoring: Señales de servidor: 50+ tools → HIGH, server name "computer-use" → HIGH, sampling capability → HIGH
+- Scoring: Credentials en resource URI → CRITICAL; API key en URL → MEDIUM
+- Output: `petrel/output/sarif.py` — SARIF 2.1.0 (`--sarif` en discover/scan)
+- Output: `petrel/output/html.py` — HTML report dark theme self-contained (`--html` en discover/scan)
+- Output: `petrel/output/cobaltohq.py` — emit `petrel.server.critical` al CobaltoHQ (auto si cobaltosec-hub instalado)
+- CLI: `petrel stats <results.jsonl>` — distribución por risk/protocol/auth/platform/source
+- CLI: `petrel diff <old.jsonl> <new.jsonl>` — servidores nuevos + escalaciones de riesgo
+- CLI: `petrel feed-corvus --source <tag>` — filtrar por fuente de discovery
+- CLI: `--resume <jsonl>` en discover — skipea URLs ya confirmadas
+- CLI: `--since <jsonl>` en discover — deduplica candidatos contra run anterior
+- Models: `Platform` enum, `MCPResource`, `MCPPrompt`, `MCPPromptArgument` models
+- Models: `MCPServerRecord` — `endpoint_path`, `server_capabilities`, `server_instructions`, `final_url`, `redirect_count`, `resources`, `prompts`, `platform`
+- Models: `worst_tier(*tiers)` variadic (antes solo aceptaba 2 args)
+- 115 nuevos tests (46 → 161, todos passing)
+
+### Fixed
+- `petrel discover --no-probe` escribía `[]` en vez del listado de URLs al archivo de output
+- `petrel feed-corvus` hardcodeaba `/mcp`; ahora usa `endpoint_path` del record
+- `petrel probe --json` mostraba el banner en stdout contaminando el JSON
+
+### Run 2 (2026-07-18)
+- 3,485 candidatos nuevos (PyPI 1,972 + GitHub 936 + HF 564 + npm 116 + crt.sh 3)
+- 140 MCP servers confirmados — 17 CRITICAL / 31 LOW / 92 INFO
+- 134 targets en `targets-v05.yaml` listos para `corvus batch`
+- Plataformas: Vercel 14, Railway 10, GCP 7, Fly 6
+
 ## [0.3.0] — 2026-07-17
 
 ### Added
