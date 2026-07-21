@@ -1,8 +1,8 @@
 # Petrel — Siguiente
 
-## Estado: v0.4.0 (2026-07-18) — 161/161 tests ✅
+## Estado: v0.6.0 (2026-07-21) — 208/208 tests ✅
 
-Repo: `github.com/CobaltoSec/petrel` · PyPI: pendiente token
+Repo: `github.com/CobaltoSec/petrel` · PyPI: `cobaltosec-petrel v0.6.0` ✅
 
 ---
 
@@ -61,47 +61,31 @@ Potencial: ~6,756 servers nuevos (2x el pool actual).
 
 ---
 
-## Phase 2 — próxima sesión inmediata post-CS16
+## PETREL-V07 — ✅ CERRADO (2026-07-21)
 
-> Implementar antes o después de Run 3 según disponibilidad.
+**14 fixes Phase 2 implementados vía workflow paralelo (6 agentes). 177 → 208 tests.**
 
-### Discovery
-| ID | Fix | Tamaño | Impacto |
-|----|-----|--------|---------|
-| DISC-002 | URL normalization pre-dedup (trailing slash, http vs https, puertos default) | S | HIGH |
-| DISC-008 | Censys cursor pagination (actualmente cap en 100 resultados, hay 500+) | XS | MEDIUM |
-| DISC-009 | npm pagination via `from` offset (cap en 250/query, hay 20K+ paquetes MCP) | XS | MEDIUM |
-| DISC-011 | Source failures son silenciosas — `SourceResult(urls, warnings, error)` namedtuple | S | MEDIUM |
+- DISC-002: URL normalization pre-dedup ✅
+- DISC-008: Censys cursor pagination 100→500 ✅
+- DISC-009: npm offset pagination 250→1000/query ✅
+- DISC-011: `SourceResult` namedtuple — errores de sources visibles ✅
+- PERF-02: Discovery sources paralelo (`asyncio.gather`) ✅
+- FP-007: SSE session path regex ✅
+- FP-008: Tool annotations capturadas (`destructive`/`readOnly`) ✅
+- FP-009: `tools/list` cursor pagination ✅
+- SR-05: Wide-surface CRITICAL FP fix (capability_tier vs structural_tier) ✅
+- SR-06: sampling + FS_READ → CRITICAL ✅
+- PERF-01: Incremental JSONL output (crash recovery) ✅
+- PERF-07: Rich progress bar con ETA ✅
+- F-03: diff muestra servers desaparecidos ✅
+- F-04: diff muestra tools nuevas en servers existentes ✅
 
-### Fingerprint
-| ID | Fix | Tamaño | Impacto |
-|----|-----|--------|---------|
-| FP-007 | SSE session path: regex en lugar de `/messages` literal | XS | MEDIUM |
-| FP-008 | Tool annotations (`destructive`, `readOnly`) capturadas en MCPTool + scoring | XS | MEDIUM |
-| FP-009 | tools/list cursor pagination (servers con 200+ tools bajo-perfilados) | S | MEDIUM |
-
-### Scoring
-| ID | Fix | Tamaño | Impacto |
-|----|-----|--------|---------|
-| SR-05 | Wide-surface CRITICAL FP: 50 getters sin auth ≡ execute_bash. Separar capability_tier vs structural_tier | M | HIGH |
-| SR-06 | sampling + FS_READ cross-signal → CRITICAL (exfiltración autónoma LLM) | S | MEDIUM |
-
-### CLI / Pipeline
-| ID | Fix | Tamaño | Impacto |
-|----|-----|--------|---------|
-| F-03 | diff: detectar servers desaparecidos entre runs (tabla "Disappeared") | S | MEDIUM |
-| F-04 | diff: detectar tools nuevos en servers existentes (set comparison) | S | MEDIUM |
-| PERF-07 | Progress bar durante probe (rich.Progress + ETA) — crítico para 10K candidatos | S | MEDIUM |
-
-### Performance
-| ID | Fix | Tamaño | Impacto |
-|----|-----|--------|---------|
-| PERF-01 | Incremental output: stream JSONL on-the-fly (crash recovery automático con --resume) | M | CRITICAL |
-| PERF-02 | Discovery sources en paralelo con asyncio.gather (actualmente serial, 4-8 min overhead) | S | HIGH |
+**PyPI:** `cobaltosec-petrel v0.5.0` + `v0.6.0` publicados ✅
+**Pendiente manual:** Smithery API key (registrar en smithery.ai → Run 3 con ~6,756 candidatos)
 
 ---
 
-## Phase 3 — futuro (post-Run 3)
+## Phase 3 — PETREL-V08 (próximo bloque)
 
 | ID | Fix | Tamaño | Impacto |
 |----|-----|--------|---------|
@@ -138,11 +122,11 @@ Potencial: ~6,756 servers nuevos (2x el pool actual).
 
 ---
 
-## Roadmap post-V06
+## Roadmap
 
-| Bloque | Contenido |
-|--------|-----------|
-| **CS16** | Corvus batch scan `targets-v05.yaml` (134 targets, 17 CRITICAL) → nuevos GHSAs |
-| **PETREL-V06 Run 3** | `petrel discover --since results-v05.jsonl` con Smithery key → 6K+ candidatos → CS17 |
-| **PETREL-V07** | Phase 2 improvements + FOFA testing (si creds disponibles) |
-| **PETREL-V08** | Phase 3 — Shodan + MCP registries + `petrel watch` modo continuo |
+| Bloque | Contenido | Estado |
+|--------|-----------|--------|
+| **CS16** | Corvus batch scan `targets-v05.yaml` | ✅ CERRADO 2026-07-20 |
+| **PETREL-V07** | Phase 2 — 14 fixes + PyPI v0.6.0 | ✅ CERRADO 2026-07-21 |
+| **Run 3** | `petrel discover --since results-v05.jsonl` con Smithery key → CS17 | pendiente Smithery key |
+| **PETREL-V08** | Phase 3 — Shodan + MCP registries + `petrel watch` | pendiente |
