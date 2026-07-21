@@ -5,20 +5,22 @@ import os
 
 import httpx
 
+from ..models import SourceResult
+
 _API = "https://fofa.info/api/v1/search/all"
 _QUERY = 'body="2024-11-05"'
 
 
-async def fofa_search(max_results: int = 500) -> list[str]:
+async def fofa_search(max_results: int = 500) -> SourceResult:
     """Search FOFA for hosts with MCP-like HTTP responses.
 
-    Returns [] silently if FOFA_EMAIL / FOFA_KEY are not set.
+    Returns SourceResult(urls=[]) silently if FOFA_EMAIL / FOFA_KEY are not set.
     Free tier: 10,000 results/month.
     """
     email = os.getenv("FOFA_EMAIL")
     key = os.getenv("FOFA_KEY")
     if not email or not key:
-        return []
+        return SourceResult(urls=[])
 
     qb64 = base64.b64encode(_QUERY.encode()).decode()
 
@@ -36,7 +38,7 @@ async def fofa_search(max_results: int = 500) -> list[str]:
                 },
             )
             if resp.status_code != 200:
-                return []
+                return SourceResult(urls=[])
             urls: list[str] = []
             for item in resp.json().get("results", []):
                 # item = [ip, port, protocol]
@@ -45,6 +47,6 @@ async def fofa_search(max_results: int = 500) -> list[str]:
                 ip, port, proto = str(item[0]), str(item[1]), str(item[2])
                 scheme = "https" if proto == "https" or port in ("443", "8443") else "http"
                 urls.append(f"{scheme}://{ip}:{port}")
-            return list(dict.fromkeys(urls))
-        except Exception:
-            return []
+            return SourceResult(urls=list(dict.fromkeys(urls)))
+        except Exception as e:
+            return SourceResult(urls=[], error=str(e))

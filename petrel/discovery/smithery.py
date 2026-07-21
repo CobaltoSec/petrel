@@ -2,6 +2,8 @@
 from __future__ import annotations
 import httpx
 
+from ..models import SourceResult
+
 _API = "https://smithery.ai/api/v1/servers"
 _PAGE_SIZE = 100
 _USER_AGENT = "petrel/0.5.0 (security research)"
@@ -17,7 +19,7 @@ def _is_deployment_url(url: str) -> bool:
     return not any(skip in url for skip in _SKIP_HOSTS)
 
 
-async def smithery_search(api_key: str | None = None) -> list[str]:
+async def smithery_search(api_key: str | None = None) -> SourceResult:
     """Paginate Smithery.ai registry, extract deployment URLs.
 
     Requires SMITHERY_API_KEY for full access (~6,756 servers).
@@ -72,4 +74,4 @@ async def smithery_search(api_key: str | None = None) -> list[str]:
                 page += 1
             except Exception:
                 break
-    return list(dict.fromkeys(urls))  # deduplicate, preserve order
+    return SourceResult(urls=list(dict.fromkeys(urls)))  # deduplicate, preserve order

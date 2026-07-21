@@ -6,6 +6,8 @@ import re
 
 import httpx
 
+from ..models import SourceResult
+
 CRTSH_KEYWORDS = ["mcp", "mcp-server", "modelcontext", "llm-server"]
 HF_QUERIES = ["mcp-server", "mcp server", "model-context-protocol", "mcp tool"]
 _HF_PAGE_SIZE = 500
@@ -38,7 +40,7 @@ def _is_likely_mcp_domain(domain: str) -> bool:
     return bool(re.search(r'(?:^|\.)mcp[\.\-]|(?:-)mcp-', d))
 
 
-async def crtsh_search(keywords: list[str] | None = None) -> list[str]:
+async def crtsh_search(keywords: list[str] | None = None) -> SourceResult:
     """Search certificate transparency logs across multiple keywords.
 
     No domain-name filtering — fingerprinting confirms if it's actually MCP.
@@ -80,19 +82,21 @@ async def crtsh_search(keywords: list[str] | None = None) -> list[str]:
             return set()
 
         all_domains: set[str] = set()
-        for i, kw in enumerate(keywords):
-            if i > 0:
-                await asyncio.sleep(1.0)  # avoid crt.sh rate limiting
-            found = await _fetch(kw)
-            # Pre-filter generic 'mcp' keyword: only keep domains that look like MCP deployments
-            if kw == "mcp":
-                before_filter = len(found)
-                found = {d for d in found if _is_likely_mcp_domain(d)}
-            all_domains.update(found)
-        return sorted(all_domains)
+        try:
+            for i, kw in enumerate(keywords):
+                if i > 0:
+                    await asyncio.sleep(1.0)  # avoid crt.sh rate limiting
+                found = await _fetch(kw)
+                # Pre-filter generic 'mcp' keyword: only keep domains that look like MCP deployments
+                if kw == "mcp":
+                    found = {d for d in found if _is_likely_mcp_domain(d)}
+                all_domains.update(found)
+            return SourceResult(urls=sorted(all_domains))
+        except Exception as e:
+            return SourceResult(urls=sorted(all_domains), error=str(e))
 
 
-async def hf_spaces_search(queries: list[str] | None = None) -> list[str]:
+async def hf_spaces_search(queries: list[str] | None = None) -> SourceResult:
     """Find MCP server spaces on HuggingFace across multiple queries with pagination."""
     if queries is None:
         queries = HF_QUERIES
@@ -140,4 +144,4 @@ async def hf_spaces_search(queries: list[str] | None = None) -> list[str]:
                 if space_id not in seen:
                     seen.add(space_id)
                     urls.append(url)
-        return urls
+        return SourceResult(urls=urls)

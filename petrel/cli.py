@@ -6,10 +6,12 @@ import json
 import sys
 from collections import Counter
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import Annotated, Any, Optional
+from urllib.parse import urlparse, urlunparse
 
 import typer
 from rich.console import Console
+from rich.progress import BarColumn, MofNCompleteColumn, Progress, SpinnerColumn, TimeRemainingColumn
 from rich.table import Table
 
 from . import __version__
@@ -21,7 +23,7 @@ from .discovery.passive import crtsh_search, hf_spaces_search
 from .discovery.pypi import pypi_search
 from .discovery.smithery import smithery_search
 from .fingerprint.probe import probe_url, probe_urls_batch
-from .models import MCPServerRecord, RiskTier
+from .models import MCPServerRecord, RiskTier, SourceResult
 from .scoring.risk import score_server
 
 app = typer.Typer(
@@ -52,6 +54,133 @@ _TIER_COLOR = {
 }
 
 _TIER_ORDER = list(RiskTier)
+
+
+# ---------------------------------------------------------------------------
+# helpers
+# ---------------------------------------------------------------------------
+
+def _normalize_url(url: str) -> str:
+    """Normalize a URL for deduplication: lowercase host, strip trailing slash, strip default ports."""
+    try:
+        p = urlparse(url.rstrip("/"))
+        host = p.hostname or ""
+        port = p.port
+        if (p.scheme == "https" and port == 443) or (p.scheme == "http" and port == 80):
+            port = None
+        netloc = host if port is None else f"{host}:{port}"
+        return urlunparse((p.scheme, netloc, p.path.rstrip("/"), p.params, p.query, ""))
+    except Exception:
+        return url
+
+
+async def _gather_sources(
+    no_censys: bool,
+    no_github: bool,
+    no_npm: bool,
+    no_smithery: bool,
+    no_pypi: bool,
+    no_fofa: bool,
+) -> list[tuple[str, str]]:
+    """Run all enabled discovery sources in parallel. Returns [(url, source_name), ...]."""
+    import os
+
+    tasks: list[tuple[str, Any]] = []
+    skipped_msgs: list[str] = []
+    smithery_key: str | None = None
+
+    # Always include crtsh and huggingface
+    tasks.append(("crtsh", crtsh_search()))
+    tasks.append(("huggingface", hf_spaces_search()))
+
+    if not no_censys:
+        if os.getenv("CENSYS_API_ID") and os.getenv("CENSYS_API_SECRET"):
+            tasks.append(("censys", censys_search()))
+        else:
+            skipped_msgs.append("  [dim]Censys: skipped (no CENSYS_API_ID/CENSYS_API_SECRET)[/dim]")
+
+    if not no_github:
+        tasks.append(("github", github_search()))
+
+    if not no_npm:
+        tasks.append(("npm", npm_search()))
+
+    if not no_smithery:
+        smithery_key = os.getenv("SMITHERY_API_KEY")
+        tasks.append(("smithery", smithery_search(api_key=smithery_key)))
+
+    if not no_pypi:
+        tasks.append(("pypi", pypi_search()))
+
+    if not no_fofa:
+        if os.getenv("FOFA_EMAIL") and os.getenv("FOFA_KEY"):
+            tasks.append(("fofa", fofa_search()))
+        else:
+            skipped_msgs.append("  [dim]FOFA: skipped (no FOFA_EMAIL/FOFA_KEY)[/dim]")
+
+    # Run all in parallel
+    results = await asyncio.gather(*[t[1] for t in tasks], return_exceptions=True)
+
+    # Print skipped messages
+    for msg in skipped_msgs:
+        console.print(msg)
+
+    _label_map = {
+        "crtsh": "crt.sh",
+        "huggingface": "HuggingFace",
+        "github": "GitHub",
+        "npm": "npm",
+        "smithery": "Smithery",
+        "pypi": "PyPI",
+        "censys": "Censys",
+        "fofa": "FOFA",
+    }
+
+    url_sources: list[tuple[str, str]] = []
+    for (src_name, _), result in zip(tasks, results):
+        label = _label_map.get(src_name, src_name)
+
+        if isinstance(result, Exception):
+            console.print(f"  [yellow]{label}: EXCEPTION — {result}[/yellow]")
+            continue
+
+        # result is a SourceResult (list subclass)
+        sr: SourceResult = result  # type: ignore[assignment]
+
+        if sr.error:
+            console.print(f"  [yellow]{label}: ERROR — {sr.error}[/yellow]")
+            # still use any partial results
+
+        # Convert to full URLs
+        if src_name == "crtsh":
+            src_urls = [f"https://{d}" for d in sr.urls]
+        else:
+            src_urls = sr.urls
+
+        if not sr.error:
+            if sr.warnings:
+                console.print(
+                    f"  [green]{label}[/green]: {len(sr.urls)} candidates "
+                    f"[yellow]({'; '.join(sr.warnings)})[/yellow]"
+                )
+            elif src_name == "crtsh":
+                console.print(f"  [green]{label}[/green]: {len(sr.urls)} domains")
+            elif src_name == "smithery":
+                if smithery_key:
+                    console.print(f"  [green]{label}[/green]: {len(sr.urls)} servers")
+                else:
+                    console.print(
+                        f"  [dim]{label}[/dim]: {len(sr.urls)} servers "
+                        f"[dim](set SMITHERY_API_KEY for full access ~6,756)[/dim]"
+                    )
+            elif src_name in ("github", "npm", "pypi"):
+                console.print(f"  [green]{label}[/green]: {len(sr.urls)} packages with deployment URLs")
+            else:
+                console.print(f"  [green]{label}[/green]: {len(sr.urls)} hosts")
+
+        url_sources.extend((u, src_name) for u in src_urls)
+
+    return url_sources
 
 
 # ---------------------------------------------------------------------------
@@ -122,79 +251,19 @@ def discover(
     async def _run() -> list[MCPServerRecord]:
         import httpx
 
-        # C1: collect (url, source) pairs from each source
-        url_sources: list[tuple[str, str]] = []
+        # PERF-02: Run all discovery sources in parallel
+        console.print("[cyan]Querying discovery sources (parallel)...[/cyan]")
+        url_sources = await _gather_sources(
+            no_censys=no_censys, no_github=no_github, no_npm=no_npm,
+            no_smithery=no_smithery, no_pypi=no_pypi, no_fofa=no_fofa,
+        )
 
-        with console.status("[cyan]Querying crt.sh (4 keywords)..."):
-            crt_domains = await crtsh_search()
-            crt_urls = [f"https://{d}" for d in crt_domains]
-        url_sources.extend((u, "crtsh") for u in crt_urls)
-        console.print(f"  [green]crt.sh[/green]: {len(crt_domains)} domains")
-
-        with console.status("[cyan]Querying HuggingFace Spaces (4 queries, paginated)..."):
-            hf_urls = await hf_spaces_search()
-        url_sources.extend((u, "huggingface") for u in hf_urls)
-        console.print(f"  [green]HuggingFace[/green]: {len(hf_urls)} spaces")
-
-        if not no_censys:
-            import os
-            has_creds = bool(os.getenv("CENSYS_API_ID") and os.getenv("CENSYS_API_SECRET"))
-            if has_creds:
-                with console.status("[cyan]Querying Censys..."):
-                    censys_urls = await censys_search()
-                url_sources.extend((u, "censys") for u in censys_urls)
-                console.print(f"  [green]Censys[/green]: {len(censys_urls)} hosts")
-            else:
-                console.print("  [dim]Censys: skipped (no CENSYS_API_ID/CENSYS_API_SECRET)[/dim]")
-
-        if not no_github:
-            with console.status("[cyan]Querying GitHub (4 queries, rate-limited)..."):
-                github_urls = await github_search()
-            url_sources.extend((u, "github") for u in github_urls)
-            console.print(f"  [green]GitHub[/green]: {len(github_urls)} repos with deployment URLs")
-
-        if not no_npm:
-            with console.status("[cyan]Querying npm registry (4 queries)..."):
-                npm_urls = await npm_search()
-            url_sources.extend((u, "npm") for u in npm_urls)
-            console.print(f"  [green]npm[/green]: {len(npm_urls)} packages with deployment URLs")
-
-        # C7: Smithery
-        if not no_smithery:
-            import os as _os
-            _smithery_key = _os.getenv("SMITHERY_API_KEY")
-            with console.status("[cyan]Querying Smithery.ai registry (paginated)..."):
-                smithery_urls = await smithery_search(api_key=_smithery_key)
-            url_sources.extend((u, "smithery") for u in smithery_urls)
-            if _smithery_key:
-                console.print(f"  [green]Smithery[/green]: {len(smithery_urls)} servers")
-            else:
-                console.print(f"  [dim]Smithery[/dim]: {len(smithery_urls)} servers [dim](set SMITHERY_API_KEY for full access ~6,756)[/dim]")
-
-        # C7: PyPI
-        if not no_pypi:
-            with console.status("[cyan]Querying PyPI package index..."):
-                pypi_urls = await pypi_search()
-            url_sources.extend((u, "pypi") for u in pypi_urls)
-            console.print(f"  [green]PyPI[/green]: {len(pypi_urls)} packages with deployment URLs")
-
-        # C7: FOFA
-        if not no_fofa:
-            import os
-            has_fofa = bool(os.getenv("FOFA_EMAIL") and os.getenv("FOFA_KEY"))
-            if has_fofa:
-                with console.status("[cyan]Querying FOFA..."):
-                    fofa_urls = await fofa_search()
-                url_sources.extend((u, "fofa") for u in fofa_urls)
-                console.print(f"  [green]FOFA[/green]: {len(fofa_urls)} hosts")
-            else:
-                console.print("  [dim]FOFA: skipped (no FOFA_EMAIL/FOFA_KEY)[/dim]")
-
-        # C1: build source_map (first-seen wins on dedup)
+        # DISC-002: normalize + dedup
         source_map: dict[str, str] = {}
         for url, src in url_sources:
-            if url not in source_map:
-                source_map[url] = src
+            norm = _normalize_url(url)
+            if norm not in source_map:
+                source_map[norm] = src
         urls = list(source_map.keys())
 
         # C6: --since deduplication
@@ -204,9 +273,9 @@ def discover(
                 line = line.strip()
                 if line:
                     r = json.loads(line)
-                    prev_urls.add(r["url"])
+                    prev_urls.add(_normalize_url(r["url"]))
                     if r.get("final_url"):
-                        prev_urls.add(r["final_url"])
+                        prev_urls.add(_normalize_url(r["final_url"]))
             before = len(urls)
             urls = [u for u in urls if u not in prev_urls]
             console.print(f"[dim]--since: {before - len(urls)} already known, {len(urls)} new candidates[/dim]")
@@ -214,7 +283,7 @@ def discover(
         # C5: --resume (skip already-confirmed)
         if resume and resume.exists():
             seen_urls = {
-                json.loads(line)["url"]
+                _normalize_url(json.loads(line)["url"])
                 for line in resume.read_text().splitlines()
                 if line.strip()
             }
@@ -234,12 +303,48 @@ def discover(
                     console.print(f"  {u}")
             return []
 
-        console.print("[cyan]Fingerprinting...[/cyan]")
-        async with httpx.AsyncClient(follow_redirects=True, timeout=10.0) as client:
-            raw = await probe_urls_batch(urls, client, concurrency=concurrency, source_map=source_map)
+        # PERF-01: open output file early for incremental writing
+        _out_fh = output.open("w", encoding="utf-8") if output else None
+        confirmed_for_summary: list[MCPServerRecord] = []
 
-        confirmed = [score_server(r) for r in raw if r is not None and r.is_confirmed_mcp]
-        return confirmed
+        try:
+            # PERF-07: progress bar on stderr
+            with Progress(
+                SpinnerColumn(),
+                "[progress.description]{task.description}",
+                BarColumn(),
+                MofNCompleteColumn(),
+                TimeRemainingColumn(),
+                console=err,
+            ) as progress:
+                task = progress.add_task("[cyan]Fingerprinting...", total=len(urls))
+
+                def _on_result(r: MCPServerRecord) -> None:
+                    """Called for each confirmed MCP server (PERF-01 + PERF-07)."""
+                    if r.is_confirmed_mcp:
+                        scored = score_server(r)
+                        confirmed_for_summary.append(scored)
+                        if _out_fh is not None:
+                            _out_fh.write(json.dumps(scored.model_dump(mode="json"), default=str) + "\n")
+                            _out_fh.flush()
+                        progress.advance(task, 1)
+
+                async with httpx.AsyncClient(follow_redirects=True, timeout=10.0) as client:
+                    raw = await probe_urls_batch(
+                        urls, client,
+                        concurrency=concurrency,
+                        source_map=source_map,
+                        on_result=_on_result,
+                    )
+        finally:
+            if _out_fh is not None:
+                _out_fh.close()
+
+        # If no output file, build confirmed list from raw
+        if not output:
+            confirmed_for_summary = [score_server(r) for r in raw if r is not None and r.is_confirmed_mcp]
+
+        return confirmed_for_summary
 
     records = asyncio.run(_run())
 
@@ -247,10 +352,7 @@ def discover(
         _print_summary(records)
 
     if output and records:
-        with output.open("w") as f:
-            for r in records:
-                f.write(json.dumps(r.model_dump(mode="json"), default=str) + "\n")
-        console.print(f"\n[dim]Results saved to {output}[/dim]")
+        console.print(f"\n[dim]Results saved incrementally to {output}[/dim]")
 
     # C8: SARIF + HTML output
     if sarif_out and records:
@@ -295,9 +397,43 @@ def scan(
     import httpx
 
     async def _run() -> list[MCPServerRecord]:
-        async with httpx.AsyncClient(follow_redirects=True, timeout=10.0) as client:
-            raw = await probe_urls_batch(urls, client, concurrency=concurrency)
-        return [score_server(r) for r in raw if r is not None and r.is_confirmed_mcp]
+        _out_fh = output.open("w", encoding="utf-8") if output else None
+        confirmed: list[MCPServerRecord] = []
+
+        try:
+            with Progress(
+                SpinnerColumn(),
+                "[progress.description]{task.description}",
+                BarColumn(),
+                MofNCompleteColumn(),
+                TimeRemainingColumn(),
+                console=err,
+            ) as progress:
+                task = progress.add_task("[cyan]Fingerprinting...", total=len(urls))
+
+                def _on_result(r: MCPServerRecord) -> None:
+                    if r.is_confirmed_mcp:
+                        scored = score_server(r)
+                        confirmed.append(scored)
+                        if _out_fh is not None:
+                            _out_fh.write(json.dumps(scored.model_dump(mode="json"), default=str) + "\n")
+                            _out_fh.flush()
+                        progress.advance(task, 1)
+
+                async with httpx.AsyncClient(follow_redirects=True, timeout=10.0) as client:
+                    raw = await probe_urls_batch(
+                        urls, client,
+                        concurrency=concurrency,
+                        on_result=_on_result,
+                    )
+        finally:
+            if _out_fh is not None:
+                _out_fh.close()
+
+        if not output:
+            confirmed = [score_server(r) for r in raw if r is not None and r.is_confirmed_mcp]
+
+        return confirmed
 
     records = asyncio.run(_run())
 
@@ -311,10 +447,7 @@ def scan(
     _print_summary(filtered)
 
     if output and filtered:
-        with output.open("w") as f:
-            for r in filtered:
-                f.write(json.dumps(r.model_dump(mode="json"), default=str) + "\n")
-        console.print(f"\n[dim]Saved to {output}[/dim]")
+        console.print(f"\n[dim]Saved incrementally to {output}[/dim]")
 
     # C8: SARIF + HTML
     if sarif_out and filtered:
@@ -555,6 +688,27 @@ def diff(
             if _TIER_ORDER.index(new_tier) > _TIER_ORDER.index(old_tier):
                 resolved[url] = (old_tier.value, new_tier.value)
 
+    # F-03: Disappeared (in old but not in new)
+    disappeared = {
+        url: r for url, r in old_map.items()
+        if url not in new_map
+    }
+
+    # F-04: New tools in existing servers
+    new_tools: dict[str, list[str]] = {}
+    for url in set(old_map) & set(new_map):
+        old_tool_names = {
+            t.get("name") if isinstance(t, dict) else t
+            for t in old_map[url].get("tools", [])
+        }
+        added = [
+            t.get("name") if isinstance(t, dict) else t
+            for t in new_map[url].get("tools", [])
+            if (t.get("name") if isinstance(t, dict) else t) not in old_tool_names
+        ]
+        if added:
+            new_tools[url] = added
+
     console.print(f"\n[bold]Diff:[/bold] {old.name} → {new.name}\n")
 
     if new_servers:
@@ -593,7 +747,35 @@ def diff(
         console.print(t)
         console.print()
 
-    if not new_servers and not escalated and not resolved:
+    # F-03: Disappeared table
+    if disappeared:
+        t = Table(title=f"Disappeared ({len(disappeared)})", show_lines=False)
+        t.add_column("Risk", width=10)
+        t.add_column("URL")
+        for url, r in sorted(
+            disappeared.items(),
+            key=lambda kv: _TIER_ORDER.index(RiskTier(kv[1].get("risk_tier", "INFO"))),
+        ):
+            tier = r.get("risk_tier", "INFO")
+            color = _TIER_COLOR.get(RiskTier(tier), "white")
+            t.add_row(f"[{color}]{tier}[/{color}]", url)
+        console.print(t)
+        console.print()
+
+    # F-04: New tools in existing servers
+    if new_tools:
+        t = Table(title=f"New Tools in Existing Servers ({len(new_tools)} servers)", show_lines=False)
+        t.add_column("URL")
+        t.add_column("New Tools")
+        for url, tools in new_tools.items():
+            tool_preview = ", ".join(str(x) for x in tools[:5])
+            if len(tools) > 5:
+                tool_preview += f" +{len(tools) - 5} more"
+            t.add_row(url, tool_preview)
+        console.print(t)
+        console.print()
+
+    if not new_servers and not escalated and not resolved and not disappeared and not new_tools:
         console.print("[green]No changes above --min-risk threshold.[/green]")
 
 

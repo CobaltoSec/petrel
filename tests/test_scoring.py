@@ -533,3 +533,108 @@ def test_sr01_fs_write_network_cluster_high():
     tiers = [f[0] for f in findings]
     assert RiskTier.HIGH in tiers or RiskTier.CRITICAL in tiers
     assert any("supply-chain" in f[1] for f in findings)
+
+
+# ---------------------------------------------------------------------------
+# SR-05 — Wide-surface CRITICAL FP fix
+# ---------------------------------------------------------------------------
+
+def test_sr05_wide_surface_read_only_no_auth_is_high_not_critical():
+    """50 read_file-style tools (MEDIUM) + no auth → HIGH, not CRITICAL.
+
+    Wide surface is a structural signal only; auth escalation to CRITICAL
+    requires capability_tier to be HIGH/CRITICAL.
+    """
+    tools = [MCPTool(name=f"read_file_{i}") for i in range(50)]
+    record = MCPServerRecord(
+        url="http://wide.example.com",
+        auth_state=AuthState.NONE,
+        tools=tools,
+    )
+    result = score_server(record)
+    assert result.risk_tier == RiskTier.HIGH, f"Expected HIGH, got {result.risk_tier}"
+    assert "no authentication" in result.risk_reasons
+
+
+def test_sr05_wide_surface_read_only_with_auth_is_high():
+    """50 read_file-style tools + BEARER auth → HIGH."""
+    tools = [MCPTool(name=f"read_file_{i}") for i in range(50)]
+    record = MCPServerRecord(
+        url="http://wide.example.com",
+        auth_state=AuthState.BEARER,
+        tools=tools,
+    )
+    result = score_server(record)
+    assert result.risk_tier == RiskTier.HIGH
+
+
+def test_sr05_execute_bash_no_auth_still_critical():
+    """execute_bash (CRITICAL capability) + no auth → still CRITICAL.
+
+    SR-05 must not weaken the existing behavior for genuinely dangerous tools.
+    """
+    record = MCPServerRecord(
+        url="http://danger.example.com",
+        auth_state=AuthState.NONE,
+        tools=[MCPTool(name="execute_bash")],
+    )
+    result = score_server(record)
+    assert result.risk_tier == RiskTier.CRITICAL
+
+
+def test_sr05_wide_surface_plus_high_tool_no_auth_is_critical():
+    """Wide surface (50 tools) + one HIGH-tier tool + no auth → CRITICAL.
+
+    capability_tier reaches HIGH from write_file, so auth escalation applies.
+    """
+    # 49 benign LOW tools + 1 HIGH tool = 50 total (triggers wide surface threshold)
+    tools = [MCPTool(name=f"get_item_{i}") for i in range(49)] + [MCPTool(name="write_file")]
+    record = MCPServerRecord(
+        url="http://wide-high.example.com",
+        auth_state=AuthState.NONE,
+        tools=tools,
+    )
+    result = score_server(record)
+    assert result.risk_tier == RiskTier.CRITICAL
+
+
+# ---------------------------------------------------------------------------
+# SR-06 — sampling + FS_READ → CRITICAL (autonomous exfiltration)
+# ---------------------------------------------------------------------------
+
+def test_sr06_sampling_plus_fs_read_no_auth_is_critical():
+    """sampling capability + read_file tool + no auth → CRITICAL with exfiltration reason."""
+    record = MCPServerRecord(
+        url="http://x.example.com",
+        auth_state=AuthState.NONE,
+        server_capabilities={"sampling": True},
+        tools=[MCPTool(name="read_file")],
+    )
+    result = score_server(record)
+    assert result.risk_tier == RiskTier.CRITICAL
+    assert any("autonomous exfiltration" in r for r in result.risk_reasons)
+
+
+def test_sr06_sampling_only_no_fs_read_is_high():
+    """sampling capability alone (no FS_READ tools) → HIGH, unchanged from baseline."""
+    record = MCPServerRecord(
+        url="http://x.example.com",
+        auth_state=AuthState.BEARER,
+        server_capabilities={"sampling": True},
+        tools=[],
+    )
+    result = score_server(record)
+    assert result.risk_tier == RiskTier.HIGH
+    assert not any("autonomous exfiltration" in r for r in result.risk_reasons)
+
+
+def test_sr06_fs_read_only_no_sampling_unchanged():
+    """FS_READ tools alone (no sampling) → MEDIUM (BEARER auth), no exfiltration reason."""
+    record = MCPServerRecord(
+        url="http://x.example.com",
+        auth_state=AuthState.BEARER,
+        tools=[MCPTool(name="read_file")],
+    )
+    result = score_server(record)
+    assert result.risk_tier == RiskTier.MEDIUM
+    assert not any("autonomous exfiltration" in r for r in result.risk_reasons)

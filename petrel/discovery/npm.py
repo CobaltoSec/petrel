@@ -5,6 +5,8 @@ import asyncio
 
 import httpx
 
+from ..models import SourceResult
+
 _NPM_SEARCH_URL = "https://registry.npmjs.org/-/v1/search"
 _USER_AGENT = "petrel/0.3.0 (security research)"
 
@@ -34,11 +36,16 @@ def _is_deployment_url(url: str) -> bool:
     return not any(skip in url for skip in _SKIP_HOSTS)
 
 
-async def npm_search(queries: list[str] | None = None) -> list[str]:
+async def npm_search(
+    queries: list[str] | None = None,
+    max_per_query: int = 1000,
+) -> SourceResult:
     """Search npm registry for MCP-related packages and extract deployment URLs.
 
-    All queries run concurrently. Returns deduplicated deployment URLs from
-    package homepage/links fields.
+    All queries run concurrently. Within each query, pages are fetched serially
+    using the ``from`` offset parameter until fewer than 250 results are returned
+    or ``max_per_query`` total results have been fetched. Returns deduplicated
+    deployment URLs from package homepage/links fields.
     """
     if queries is None:
         queries = NPM_QUERIES
@@ -50,23 +57,29 @@ async def npm_search(queries: list[str] | None = None) -> list[str]:
     ) as client:
 
         async def _fetch_query(query: str) -> list[str]:
-            try:
-                resp = await client.get(
-                    _NPM_SEARCH_URL,
-                    params={"text": query, "size": 250},
-                )
-                if resp.status_code != 200:
-                    return []
-                urls = []
-                for obj in resp.json().get("objects", []):
-                    pkg = obj.get("package", {})
-                    links = pkg.get("links", {})
-                    homepage = (links.get("homepage") or pkg.get("homepage") or "").strip()
-                    if _is_deployment_url(homepage):
-                        urls.append(homepage)
-                return urls
-            except Exception:
-                return []
+            urls: list[str] = []
+            offset = 0
+            while offset < max_per_query:
+                try:
+                    resp = await client.get(
+                        _NPM_SEARCH_URL,
+                        params={"text": query, "size": 250, "from": offset},
+                    )
+                    if resp.status_code != 200:
+                        break
+                    objects = resp.json().get("objects", [])
+                    for obj in objects:
+                        pkg = obj.get("package", {})
+                        links = pkg.get("links", {})
+                        homepage = (links.get("homepage") or pkg.get("homepage") or "").strip()
+                        if _is_deployment_url(homepage):
+                            urls.append(homepage)
+                    if len(objects) < 250:
+                        break
+                    offset += 250
+                except Exception:
+                    break
+            return urls
 
         all_results = await asyncio.gather(*[_fetch_query(q) for q in queries])
 
@@ -78,4 +91,4 @@ async def npm_search(queries: list[str] | None = None) -> list[str]:
                     seen.add(url)
                     result.append(url)
 
-        return result
+        return SourceResult(urls=result)

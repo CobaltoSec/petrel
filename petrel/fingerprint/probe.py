@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import asyncio
+import re
+from typing import Callable
 from urllib.parse import parse_qs, urlparse
 
 import httpx
@@ -31,7 +33,10 @@ _INITIALIZE = {
     },
 }
 _TOOLS_LIST = {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}
+_TOOLS_LIST_CURSOR = lambda cursor: {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {"cursor": cursor}}  # noqa: E731
 _RESOURCES_LIST = {"jsonrpc": "2.0", "id": 3, "method": "resources/list", "params": {}}
+
+_SSE_PATH_RE = re.compile(r'data:\s*(/[^\s]+)')
 _PROMPTS_LIST = {"jsonrpc": "2.0", "id": 4, "method": "prompts/list", "params": {}}
 
 _URL_AUTH_PARAMS = frozenset([
@@ -104,7 +109,14 @@ async def probe_urls_batch(
     client: httpx.AsyncClient,
     concurrency: int = 20,
     source_map: dict[str, str] | None = None,
+    on_result: Callable[[MCPServerRecord], None] | None = None,
 ) -> list[MCPServerRecord | None]:
+    """Probe a batch of URLs concurrently.
+
+    Args:
+        on_result: Optional callback fired for each confirmed MCP server found.
+                   Use it for incremental output or progress tracking.
+    """
     sem = asyncio.Semaphore(concurrency)
 
     async def _safe_probe(url: str) -> MCPServerRecord | None:
@@ -113,6 +125,8 @@ async def probe_urls_batch(
                 result = await probe_url(url, client)
                 if result is not None and source_map:
                     result.discovered_via = source_map.get(url, "probe")
+                if result is not None and on_result:
+                    on_result(result)
                 return result
             except Exception:
                 return None
@@ -216,8 +230,9 @@ async def _probe_sse(url: str, client: httpx.AsyncClient) -> MCPServerRecord | N
 
                 async for raw_line in resp.aiter_lines():
                     line = raw_line.strip()
-                    if line.startswith("data:") and "/messages" in line:
-                        session_path = line[5:].strip()
+                    m = _SSE_PATH_RE.match(line)
+                    if m:
+                        session_path = m.group(1)
                         break
                     if not line:
                         break
@@ -261,23 +276,30 @@ async def _probe_sse(url: str, client: httpx.AsyncClient) -> MCPServerRecord | N
 
 
 async def _get_tools(endpoint: str, client: httpx.AsyncClient) -> list[MCPTool]:
-    try:
-        resp = await client.post(endpoint, json=_TOOLS_LIST, timeout=httpx.Timeout(connect=3.0, read=8.0, write=5.0, pool=5.0))
-        if resp.status_code != 200:
-            return []
-        data = resp.json()
-        tools_raw = data.get("result", {}).get("tools", [])
-        return [
-            MCPTool(
-                name=t.get("name", ""),
-                description=t.get("description"),
-                inputSchema=t.get("inputSchema"),
-            )
-            for t in tools_raw
-            if t.get("name")
-        ]
-    except Exception:
-        return []
+    tools: list[MCPTool] = []
+    cursor: str | None = None
+    for _ in range(10):  # max 10 pages (1000+ tools is unrealistic)
+        req = _TOOLS_LIST_CURSOR(cursor) if cursor else _TOOLS_LIST
+        try:
+            resp = await client.post(endpoint, json=req, timeout=httpx.Timeout(connect=3.0, read=8.0, write=5.0, pool=5.0))
+            if resp.status_code != 200:
+                break
+            data = resp.json()
+            result = data.get("result", {})
+            for t in result.get("tools", []):
+                if t.get("name"):
+                    tools.append(MCPTool(
+                        name=t["name"],
+                        description=t.get("description"),
+                        inputSchema=t.get("inputSchema"),
+                        annotations=t.get("annotations"),
+                    ))
+            cursor = result.get("nextCursor")
+            if not cursor:
+                break
+        except Exception:
+            break
+    return tools
 
 
 async def _get_resources(endpoint: str, client: httpx.AsyncClient) -> list[MCPResource]:

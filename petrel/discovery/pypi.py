@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import httpx
 
+from ..models import SourceResult
+
 _SIMPLE_URL = "https://pypi.org/simple/"
 _PKG_JSON_URL = "https://pypi.org/pypi/{}/json"
 _USER_AGENT = "petrel/0.5.0 (security research)"
@@ -24,7 +26,7 @@ def _is_mcp_package(name: str) -> bool:
     return any(sub in n for sub in _MCP_SUBSTRINGS)
 
 
-async def pypi_search() -> list[str]:
+async def pypi_search() -> SourceResult:
     """Two-phase PyPI discovery: filter package names → extract deployment URLs."""
     async with httpx.AsyncClient(
         timeout=60.0,
@@ -36,14 +38,14 @@ async def pypi_search() -> list[str]:
         try:
             resp = await client.get(_SIMPLE_URL)
             if resp.status_code != 200:
-                return []
+                return SourceResult(urls=[])
             candidates = [
                 p["name"]
                 for p in resp.json().get("projects", [])
                 if _is_mcp_package(p.get("name", ""))
             ]
-        except Exception:
-            return []
+        except Exception as e:
+            return SourceResult(urls=[], error=str(e))
 
     sem = asyncio.Semaphore(10)
 
@@ -69,4 +71,4 @@ async def pypi_search() -> list[str]:
 
     batches = await asyncio.gather(*[_fetch_pkg(n) for n in candidates])
     all_urls = [u for batch in batches for u in batch]
-    return list(dict.fromkeys(all_urls))
+    return SourceResult(urls=list(dict.fromkeys(all_urls)))

@@ -411,6 +411,47 @@ async def test_f5_probe_batch_source_map_fallback(httpx_mock: HTTPXMock):
 
 
 # ---------------------------------------------------------------------------
+# PERF-07 — progress callback invoked for each confirmed server
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_perf07_on_result_callback_invoked(httpx_mock: HTTPXMock):
+    """on_result callback is fired once per confirmed MCP server in probe_urls_batch."""
+    httpx_mock.add_response(
+        method="POST",
+        url="http://perf07a.example.com/mcp",
+        json=_make_init_response(),
+    )
+    _add_primitives_mocks(httpx_mock, "http://perf07a.example.com/mcp")
+    # Second URL: not an MCP server (404 on all paths)
+    for path in ["/mcp", "/", "/api/mcp", "/api", "/v1/mcp"]:
+        httpx_mock.add_response(
+            method="POST",
+            url=f"http://perf07b.example.com{path}",
+            status_code=404,
+        )
+    for path in ["/sse", "/api/sse", "/mcp/sse", "/events"]:
+        httpx_mock.add_response(
+            method="GET",
+            url=f"http://perf07b.example.com{path}",
+            status_code=404,
+        )
+
+    called_with: list = []
+
+    async with httpx.AsyncClient() as client:
+        await probe_urls_batch(
+            ["http://perf07a.example.com", "http://perf07b.example.com"],
+            client,
+            on_result=called_with.append,
+        )
+
+    # Callback fired once for the confirmed server, not for the non-MCP one
+    assert len(called_with) == 1
+    assert called_with[0].url == "http://perf07a.example.com"
+
+
+# ---------------------------------------------------------------------------
 # FP-002, FP-003, FP-001 — fingerprint false-positive fixes
 # ---------------------------------------------------------------------------
 
@@ -473,3 +514,191 @@ async def test_fp001_jsonrpc_error_returns_partial_record():
     assert record is not None
     assert record.is_confirmed_mcp is True
     assert record.protocol.value == "streamable-http"
+
+
+# ---------------------------------------------------------------------------
+# FP-007 — SSE session path regex
+# ---------------------------------------------------------------------------
+
+from petrel.fingerprint.probe import _probe_sse
+
+
+def _add_sse_post_mocks(httpx_mock: HTTPXMock, msg_url: str) -> None:
+    """Add init + tools/resources/prompts mocks for an SSE message endpoint."""
+    httpx_mock.add_response(
+        method="POST",
+        url=msg_url,
+        json={"jsonrpc": "2.0", "id": 1, "result": {"protocolVersion": "2024-11-05", "capabilities": {}}},
+    )
+    httpx_mock.add_response(method="POST", url=msg_url, json={"jsonrpc": "2.0", "id": 2, "result": {"tools": []}})
+    httpx_mock.add_response(method="POST", url=msg_url, json={"jsonrpc": "2.0", "id": 3, "result": {"resources": []}})
+    httpx_mock.add_response(method="POST", url=msg_url, json={"jsonrpc": "2.0", "id": 4, "result": {"prompts": []}})
+
+
+@pytest.mark.asyncio
+async def test_fp007_sse_path_messages_querystring(httpx_mock: HTTPXMock):
+    """SSE sends data: /messages?sessionId=abc → session_path extracted correctly."""
+    httpx_mock.add_response(
+        method="GET",
+        url="http://sse7a.example.com/sse",
+        headers={"content-type": "text/event-stream"},
+        content=b"data: /messages?sessionId=abc\n\n",
+    )
+    _add_sse_post_mocks(httpx_mock, "http://sse7a.example.com/messages?sessionId=abc")
+
+    async with httpx.AsyncClient() as client:
+        record = await _probe_sse("http://sse7a.example.com", client)
+
+    assert record is not None
+    assert record.protocol == Protocol.SSE_LEGACY
+
+
+@pytest.mark.asyncio
+async def test_fp007_sse_path_api_v1_session(httpx_mock: HTTPXMock):
+    """SSE sends data: /api/v1/session/123/messages → extracted correctly."""
+    httpx_mock.add_response(
+        method="GET",
+        url="http://sse7b.example.com/sse",
+        headers={"content-type": "text/event-stream"},
+        content=b"data: /api/v1/session/123/messages\n\n",
+    )
+    _add_sse_post_mocks(httpx_mock, "http://sse7b.example.com/api/v1/session/123/messages")
+
+    async with httpx.AsyncClient() as client:
+        record = await _probe_sse("http://sse7b.example.com", client)
+
+    assert record is not None
+    assert record.protocol == Protocol.SSE_LEGACY
+
+
+@pytest.mark.asyncio
+async def test_fp007_sse_path_connect_no_messages(httpx_mock: HTTPXMock):
+    """SSE sends data: /connect (no /messages) → still extracted (regression: old code would miss this)."""
+    httpx_mock.add_response(
+        method="GET",
+        url="http://sse7c.example.com/sse",
+        headers={"content-type": "text/event-stream"},
+        content=b"data: /connect\n\n",
+    )
+    _add_sse_post_mocks(httpx_mock, "http://sse7c.example.com/connect")
+
+    async with httpx.AsyncClient() as client:
+        record = await _probe_sse("http://sse7c.example.com", client)
+
+    assert record is not None
+    assert record.protocol == Protocol.SSE_LEGACY
+
+
+# ---------------------------------------------------------------------------
+# FP-008 — Tool annotations
+# ---------------------------------------------------------------------------
+
+from petrel.fingerprint.probe import _get_tools
+
+
+@pytest.mark.asyncio
+async def test_fp008_tool_annotations_populated(httpx_mock: HTTPXMock):
+    """Tool with annotations → MCPTool.annotations populated."""
+    httpx_mock.add_response(
+        method="POST",
+        url="http://ann8a.example.com/mcp",
+        json={"jsonrpc": "2.0", "id": 2, "result": {
+            "tools": [
+                {"name": "read_file", "description": "Read a file", "annotations": {"readOnly": True, "safe": True}},
+            ],
+        }},
+    )
+
+    async with httpx.AsyncClient() as client:
+        tools = await _get_tools("http://ann8a.example.com/mcp", client)
+
+    assert len(tools) == 1
+    assert tools[0].annotations == {"readOnly": True, "safe": True}
+
+
+@pytest.mark.asyncio
+async def test_fp008_tool_no_annotations_is_none(httpx_mock: HTTPXMock):
+    """Tool without annotations → MCPTool.annotations is None."""
+    httpx_mock.add_response(
+        method="POST",
+        url="http://ann8b.example.com/mcp",
+        json={"jsonrpc": "2.0", "id": 2, "result": {
+            "tools": [{"name": "execute", "description": "Execute"}],
+        }},
+    )
+
+    async with httpx.AsyncClient() as client:
+        tools = await _get_tools("http://ann8b.example.com/mcp", client)
+
+    assert len(tools) == 1
+    assert tools[0].annotations is None
+
+
+# ---------------------------------------------------------------------------
+# FP-009 — tools/list cursor pagination
+# ---------------------------------------------------------------------------
+
+import re as _re
+
+
+@pytest.mark.asyncio
+async def test_fp009_cursor_pagination_two_pages(httpx_mock: HTTPXMock):
+    """Server returns 3 tools + nextCursor on page 1, 2 tools on page 2 → total 5."""
+    httpx_mock.add_response(
+        method="POST",
+        url="http://cur9a.example.com/mcp",
+        json={"jsonrpc": "2.0", "id": 2, "result": {
+            "tools": [{"name": "t1"}, {"name": "t2"}, {"name": "t3"}],
+            "nextCursor": "cursor_pg2",
+        }},
+    )
+    httpx_mock.add_response(
+        method="POST",
+        url="http://cur9a.example.com/mcp",
+        json={"jsonrpc": "2.0", "id": 2, "result": {
+            "tools": [{"name": "t4"}, {"name": "t5"}],
+        }},
+    )
+
+    async with httpx.AsyncClient() as client:
+        tools = await _get_tools("http://cur9a.example.com/mcp", client)
+
+    assert len(tools) == 5
+    assert [t.name for t in tools] == ["t1", "t2", "t3", "t4", "t5"]
+
+
+@pytest.mark.asyncio
+async def test_fp009_no_cursor_single_request(httpx_mock: HTTPXMock):
+    """Server with no nextCursor → single request (existing behavior preserved)."""
+    httpx_mock.add_response(
+        method="POST",
+        url="http://cur9b.example.com/mcp",
+        json={"jsonrpc": "2.0", "id": 2, "result": {
+            "tools": [{"name": "tool1"}, {"name": "tool2"}],
+        }},
+    )
+
+    async with httpx.AsyncClient() as client:
+        tools = await _get_tools("http://cur9b.example.com/mcp", client)
+
+    assert len(tools) == 2
+
+
+@pytest.mark.asyncio
+async def test_fp009_cursor_max_10_pages(httpx_mock: HTTPXMock):
+    """Cursor loop stops at max 10 pages even when server always returns nextCursor."""
+    httpx_mock.add_response(
+        method="POST",
+        url=_re.compile(r"http://cur9c\.example\.com/mcp"),
+        is_reusable=True,
+        json={"jsonrpc": "2.0", "id": 2, "result": {
+            "tools": [{"name": "tool"}],
+            "nextCursor": "always_more",
+        }},
+    )
+
+    async with httpx.AsyncClient() as client:
+        tools = await _get_tools("http://cur9c.example.com/mcp", client)
+
+    # 10 pages × 1 tool = 10 tools
+    assert len(tools) == 10

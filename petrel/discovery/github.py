@@ -6,6 +6,8 @@ import os
 
 import httpx
 
+from ..models import SourceResult
+
 _API_BASE = "https://api.github.com"
 _USER_AGENT = "petrel/0.5.0 (security research)"
 
@@ -41,7 +43,7 @@ def _is_deployment_url(url: str) -> bool:
 async def github_search(
     queries: list[str] | None = None,
     token: str | None = None,
-) -> list[str]:
+) -> SourceResult:
     """Search GitHub repos for MCP server deployment URLs via homepage fields.
 
     GITHUB_TOKEN env var used if token not provided (raises rate limit 10→30 req/min).
@@ -94,12 +96,14 @@ async def github_search(
 
         seen: set[str] = set()
         result: list[str] = []
-        for i, query in enumerate(queries):
-            if i > 0:
-                await asyncio.sleep(delay)
-            for url in await _fetch_query(query):
-                if url not in seen:
-                    seen.add(url)
-                    result.append(url)
-
-        return result
+        try:
+            for i, query in enumerate(queries):
+                if i > 0:
+                    await asyncio.sleep(delay)
+                for url in await _fetch_query(query):
+                    if url not in seen:
+                        seen.add(url)
+                        result.append(url)
+            return SourceResult(urls=result)
+        except Exception as e:
+            return SourceResult(urls=result, error=str(e))

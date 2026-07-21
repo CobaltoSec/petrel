@@ -8,6 +8,26 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 
+class SourceResult(list):
+    """Result from a discovery source function.
+
+    Extends list for backwards compatibility — existing code that does
+    ``"url" in result`` or ``result == []`` continues to work unchanged.
+    New code can inspect ``.urls``, ``.warnings``, and ``.error``.
+    """
+
+    def __init__(
+        self,
+        urls: list[str],
+        warnings: list[str] | None = None,
+        error: str | None = None,
+    ) -> None:
+        super().__init__(urls)
+        self.urls: list[str] = urls
+        self.warnings: list[str] = warnings if warnings is not None else []
+        self.error: str | None = error
+
+
 class Protocol(str, Enum):
     STREAMABLE_HTTP = "streamable-http"
     SSE_LEGACY = "sse-legacy"
@@ -75,6 +95,7 @@ class MCPTool(BaseModel):
     name: str
     description: str | None = None
     input_schema: dict[str, Any] | None = Field(default=None, alias="inputSchema")
+    annotations: dict[str, Any] | None = None
     risk_tier: RiskTier = RiskTier.INFO
     schema_risk_params: list[str] = []  # dangerous inputSchema param names found by scorer
 

@@ -227,45 +227,67 @@ def score_server(record: MCPServerRecord) -> MCPServerRecord:
     record.tools = scored_tools
 
     reasons: list[str] = []
-    server_tier = RiskTier.INFO
+    # capability_tier: from tool danger scores, clustering, capabilities, and resources.
+    # Represents actual dangerous capabilities present on the server.
+    capability_tier = RiskTier.INFO
+    # structural_tier: from wide surface count and dangerous server name.
+    # Represents structural signals only — not proof of dangerous capability.
+    structural_tier = RiskTier.INFO
 
-    # 2. Aggregate tool tiers
+    # 2. Aggregate tool tiers → capability
     for tool in scored_tools:
         if tool.risk_tier in (RiskTier.CRITICAL, RiskTier.HIGH, RiskTier.MEDIUM):
-            server_tier = worst_tier(server_tier, tool.risk_tier)
+            capability_tier = worst_tier(capability_tier, tool.risk_tier)
             if tool.risk_tier in (RiskTier.CRITICAL, RiskTier.HIGH):
                 reasons.append(f"tool '{tool.name}' ({tool.risk_tier})")
 
-    # 3. Tool clustering (S3)
+    # 3. Tool clustering (S3) → capability
     for tier, reason in _detect_clusters(scored_tools):
-        server_tier = worst_tier(server_tier, tier)
+        capability_tier = worst_tier(capability_tier, tier)
         reasons.append(reason)
 
-    # 4. Wide attack surface + dangerous server name (S4)
+    # 4. Wide attack surface + dangerous server name (S4) → structural only
     tool_count = len(scored_tools)
     if tool_count >= _WIDE_SURFACE_THRESHOLD:
-        server_tier = worst_tier(server_tier, RiskTier.HIGH)
+        structural_tier = worst_tier(structural_tier, RiskTier.HIGH)
         reasons.append(f"wide attack surface ({tool_count} tools)")
     if record.server_name:
         sn = record.server_name.lower()
         if any(p in sn for p in _DANGEROUS_SERVER_NAMES):
-            server_tier = worst_tier(server_tier, RiskTier.HIGH)
+            structural_tier = worst_tier(structural_tier, RiskTier.HIGH)
             reasons.append(f"server name signals dangerous capability: '{record.server_name}'")
 
-    # 5. Capabilities scoring (S5a)
+    # 5. Capabilities scoring (S5a) → capability
     for tier, reason in _score_capabilities(record.server_capabilities):
-        server_tier = worst_tier(server_tier, tier)
+        capability_tier = worst_tier(capability_tier, tier)
         reasons.append(reason)
 
-    # 6. Resource URI scoring (S5b)
+    # 6. Resource URI scoring (S5b) → capability
     for tier, reason in _score_resources(record.resources):
-        server_tier = worst_tier(server_tier, tier)
+        capability_tier = worst_tier(capability_tier, tier)
         reasons.append(reason)
 
-    # 7. Auth escalation (existing logic)
+    # SR-06: sampling + FS_READ tools → autonomous exfiltration → CRITICAL.
+    # An LLM with sampling can initiate outbound calls; paired with filesystem read
+    # tools it can exfiltrate data entirely without human intervention.
+    tool_names_lower = {t.name.lower() for t in scored_tools}
+    if record.server_capabilities.get("sampling") and (tool_names_lower & _FAMILY_FS_READ):
+        capability_tier = worst_tier(capability_tier, RiskTier.CRITICAL)
+        reasons.append("autonomous exfiltration: sampling + filesystem read")
+
+    # Combined server tier: both capability and structural signals contribute.
+    server_tier = worst_tier(capability_tier, structural_tier)
+
+    # 7. Auth escalation: HIGH→CRITICAL only when capability_tier is HIGH/CRITICAL.
+    #    Wide-surface structural signals alone do NOT warrant CRITICAL escalation —
+    #    50 read_file tools with no auth is HIGH, not the same as execute_bash + no auth.
     if record.auth_state == AuthState.NONE:
-        if server_tier in (RiskTier.CRITICAL, RiskTier.HIGH):
+        if capability_tier in (RiskTier.CRITICAL, RiskTier.HIGH):
             server_tier = RiskTier.CRITICAL
+            reasons.insert(0, "no authentication")
+        elif server_tier in (RiskTier.CRITICAL, RiskTier.HIGH):
+            # Only structural HIGH (wide surface / dangerous name, benign tools):
+            # server_tier is already HIGH from structural; keep it, don't escalate to CRITICAL.
             reasons.insert(0, "no authentication")
         elif server_tier == RiskTier.MEDIUM:
             server_tier = RiskTier.HIGH

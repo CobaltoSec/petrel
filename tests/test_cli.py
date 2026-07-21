@@ -8,6 +8,7 @@ import pytest
 from typer.testing import CliRunner
 
 from petrel.cli import app
+from petrel.models import SourceResult
 
 runner = CliRunner()
 
@@ -113,14 +114,15 @@ def test_discover_no_probe_writes_urls_to_file(tmp_path: Path):
 
     fake_urls = ["https://alpha.example.com", "https://beta.example.com"]
 
-    with patch("petrel.cli.crtsh_search", new_callable=AsyncMock, return_value=["alpha.example.com"]), \
-         patch("petrel.cli.hf_spaces_search", new_callable=AsyncMock, return_value=["https://beta.example.com"]), \
-         patch("petrel.cli.censys_search", new_callable=AsyncMock, return_value=[]), \
-         patch("petrel.cli.github_search", new_callable=AsyncMock, return_value=[]), \
-         patch("petrel.cli.npm_search", new_callable=AsyncMock, return_value=[]), \
-         patch("petrel.cli.smithery_search", new_callable=AsyncMock, return_value=[]), \
-         patch("petrel.cli.pypi_search", new_callable=AsyncMock, return_value=[]), \
-         patch("petrel.cli.fofa_search", new_callable=AsyncMock, return_value=[]):
+    _empty = SourceResult(urls=[])
+    with patch("petrel.cli.crtsh_search", new_callable=AsyncMock, return_value=SourceResult(urls=["alpha.example.com"])), \
+         patch("petrel.cli.hf_spaces_search", new_callable=AsyncMock, return_value=SourceResult(urls=["https://beta.example.com"])), \
+         patch("petrel.cli.censys_search", new_callable=AsyncMock, return_value=_empty), \
+         patch("petrel.cli.github_search", new_callable=AsyncMock, return_value=_empty), \
+         patch("petrel.cli.npm_search", new_callable=AsyncMock, return_value=_empty), \
+         patch("petrel.cli.smithery_search", new_callable=AsyncMock, return_value=_empty), \
+         patch("petrel.cli.pypi_search", new_callable=AsyncMock, return_value=_empty), \
+         patch("petrel.cli.fofa_search", new_callable=AsyncMock, return_value=_empty):
         result = runner.invoke(app, [
             "discover",
             "--no-probe",
@@ -367,3 +369,185 @@ def test_sr04_risk_tier_present_and_sorted(tmp_path: Path):
     # CRITICAL va primero
     assert targets[0]["risk_tier"] == "CRITICAL"
     assert targets[1]["risk_tier"] == "LOW"
+
+
+# ---------------------------------------------------------------------------
+# DISC-002: URL normalization pre-dedup
+# ---------------------------------------------------------------------------
+
+def test_disc002_url_normalization_dedup(tmp_path: Path):
+    """DISC-002: URLs that normalize to the same form are deduplicated before probing."""
+    from unittest.mock import AsyncMock, patch
+
+    # crtsh returns domain "foo.example.com" → converted to "https://foo.example.com"
+    # hf returns "https://foo.example.com/" → strips trailing slash → same normalized URL
+    # Result: only 1 candidate, not 2
+    with patch("petrel.cli.crtsh_search", new_callable=AsyncMock,
+               return_value=SourceResult(urls=["foo.example.com"])), \
+         patch("petrel.cli.hf_spaces_search", new_callable=AsyncMock,
+               return_value=SourceResult(urls=["https://foo.example.com/"])):
+        result = runner.invoke(app, [
+            "discover", "--no-probe",
+            "--no-censys", "--no-github", "--no-npm", "--no-smithery", "--no-pypi", "--no-fofa",
+        ])
+
+    assert result.exit_code == 0, result.output
+    assert "Candidates:" in result.output
+    # Only 1 unique candidate after normalization
+    assert "Candidates: 1" in result.output
+
+
+# ---------------------------------------------------------------------------
+# DISC-011: SourceResult error visibility
+# ---------------------------------------------------------------------------
+
+def test_disc011_source_error_printed(tmp_path: Path):
+    """DISC-011: When a source returns SourceResult with error → error is visible in output."""
+    from unittest.mock import AsyncMock, patch
+
+    with patch("petrel.cli.crtsh_search", new_callable=AsyncMock,
+               return_value=SourceResult(urls=[], error="connection refused")), \
+         patch("petrel.cli.hf_spaces_search", new_callable=AsyncMock,
+               return_value=SourceResult(urls=[])):
+        result = runner.invoke(app, [
+            "discover", "--no-probe",
+            "--no-censys", "--no-github", "--no-npm", "--no-smithery", "--no-pypi", "--no-fofa",
+        ])
+
+    assert result.exit_code == 0, result.output
+    assert "connection refused" in result.output or "ERROR" in result.output
+
+
+# ---------------------------------------------------------------------------
+# PERF-01: Incremental JSONL output
+# ---------------------------------------------------------------------------
+
+def test_perf01_incremental_output(tmp_path: Path):
+    """PERF-01: Results written to file incrementally via on_result callback."""
+    from unittest.mock import AsyncMock, patch
+    from petrel.models import MCPServerRecord, Protocol, AuthState
+
+    out_file = tmp_path / "results.jsonl"
+
+    servers = [
+        MCPServerRecord(
+            url=f"https://server{i}.example.com",
+            protocol=Protocol.STREAMABLE_HTTP,
+            auth_state=AuthState.NONE,
+        )
+        for i in range(3)
+    ]
+
+    async def _fake_batch(urls, client, concurrency=20, source_map=None, on_result=None):
+        for r in servers:
+            if on_result:
+                on_result(r)
+        return servers
+
+    with patch("petrel.cli.crtsh_search", new_callable=AsyncMock,
+               return_value=SourceResult(urls=["server0.example.com"])), \
+         patch("petrel.cli.hf_spaces_search", new_callable=AsyncMock,
+               return_value=SourceResult(urls=[])), \
+         patch("petrel.cli.probe_urls_batch", side_effect=_fake_batch):
+        result = runner.invoke(app, [
+            "discover", "--output", str(out_file),
+            "--no-censys", "--no-github", "--no-npm", "--no-smithery", "--no-pypi", "--no-fofa",
+        ])
+
+    assert result.exit_code == 0, result.output
+    assert out_file.exists(), "Output file was not created"
+    lines = [ln for ln in out_file.read_text().splitlines() if ln.strip()]
+    assert len(lines) == 3, f"Expected 3 records written incrementally, got {len(lines)}"
+
+
+# ---------------------------------------------------------------------------
+# PERF-02: Parallel discovery sources
+# ---------------------------------------------------------------------------
+
+def test_perf02_all_sources_invoked(tmp_path: Path):
+    """PERF-02: All enabled discovery sources are invoked in a single discover run."""
+    from unittest.mock import AsyncMock, patch
+
+    empty = SourceResult(urls=[])
+    crt_mock = AsyncMock(return_value=empty)
+    hf_mock = AsyncMock(return_value=empty)
+    gh_mock = AsyncMock(return_value=empty)
+    npm_mock = AsyncMock(return_value=empty)
+    sm_mock = AsyncMock(return_value=empty)
+    pypi_mock = AsyncMock(return_value=empty)
+
+    with patch("petrel.cli.crtsh_search", crt_mock), \
+         patch("petrel.cli.hf_spaces_search", hf_mock), \
+         patch("petrel.cli.github_search", gh_mock), \
+         patch("petrel.cli.npm_search", npm_mock), \
+         patch("petrel.cli.smithery_search", sm_mock), \
+         patch("petrel.cli.pypi_search", pypi_mock):
+        runner.invoke(app, [
+            "discover", "--no-probe", "--no-censys", "--no-fofa",
+        ])
+
+    assert crt_mock.called, "crtsh_search was not called"
+    assert hf_mock.called, "hf_spaces_search was not called"
+    assert gh_mock.called, "github_search was not called"
+    assert npm_mock.called, "npm_search was not called"
+    assert sm_mock.called, "smithery_search was not called"
+    assert pypi_mock.called, "pypi_search was not called"
+
+
+# ---------------------------------------------------------------------------
+# F-03: diff — disappeared servers
+# ---------------------------------------------------------------------------
+
+def test_f03_diff_disappeared_servers(tmp_path: Path):
+    """F-03: diff shows servers present in old but absent in new as Disappeared."""
+    old_path = tmp_path / "old.jsonl"
+    new_path = tmp_path / "new.jsonl"
+
+    old_path.write_text(
+        json.dumps(_CRITICAL_RECORD) + "\n" +
+        json.dumps(_LOW_RECORD)
+    )
+    # new run only has the LOW record — CRITICAL disappeared
+    new_path.write_text(json.dumps(_LOW_RECORD))
+
+    result = runner.invoke(app, [
+        "diff", str(old_path), str(new_path), "--min-risk", "LOW",
+    ])
+
+    assert result.exit_code == 0, result.output
+    assert "Disappeared" in result.output
+    assert "critical.example.com" in result.output
+
+
+# ---------------------------------------------------------------------------
+# F-04: diff — new tools in existing servers
+# ---------------------------------------------------------------------------
+
+def test_f04_diff_new_tools_in_existing(tmp_path: Path):
+    """F-04: diff shows new tools added to a server that exists in both runs."""
+    old_path = tmp_path / "old.jsonl"
+    new_path = tmp_path / "new.jsonl"
+
+    shared_url = "https://shared.example.com"
+    old_rec = dict(
+        _LOW_RECORD,
+        url=shared_url,
+        tools=[{"name": "existing_tool", "risk_tier": "INFO", "schema_risk_params": []}],
+    )
+    new_rec = dict(
+        _LOW_RECORD,
+        url=shared_url,
+        tools=[
+            {"name": "existing_tool", "risk_tier": "INFO", "schema_risk_params": []},
+            {"name": "brand_new_tool", "risk_tier": "HIGH", "schema_risk_params": []},
+        ],
+    )
+
+    old_path.write_text(json.dumps(old_rec))
+    new_path.write_text(json.dumps(new_rec))
+
+    result = runner.invoke(app, ["diff", str(old_path), str(new_path)])
+
+    assert result.exit_code == 0, result.output
+    assert "brand_new_tool" in result.output
+    assert "New Tools" in result.output

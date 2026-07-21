@@ -5,7 +5,7 @@ from importlib.metadata import PackageNotFoundError, version as _pkg_version
 try:
     __version__: str = _pkg_version("cobaltosec-petrel")
 except PackageNotFoundError:
-    __version__ = "0.5.0"
+    __version__ = "0.6.0"
 
 from .models import AuthState, MCPServerRecord, MCPTool, Protocol, RiskTier
 

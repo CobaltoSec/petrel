@@ -2,6 +2,27 @@
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-07-21
+
+### Added
+- Discovery: Censys cursor pagination — up to 500 results/run (was 100). Loops via `result.links.next` cursor (DISC-008)
+- Discovery: npm offset pagination via `from` param — up to 1,000 results/query (was 250). 4 pages × 250 per query (DISC-009)
+- Discovery: `SourceResult` namedtuple — all 7 discovery functions now surface `.urls`, `.warnings`, `.error` instead of silently returning `[]` on failure (DISC-011)
+- Discovery: URL normalization pre-dedup — strips trailing slashes, lowercases host, removes default ports (DISC-002)
+- Discovery: All sources now run concurrently via `asyncio.gather` (was serial, 4–8 min overhead) (PERF-02)
+- Fingerprint: SSE session path extracted via regex instead of `/messages` literal — catches `/api/v1/messages`, `/connect`, custom paths (FP-007)
+- Fingerprint: Tool `annotations` (`destructive`, `readOnly`, `openWorld`) captured in `MCPTool.annotations` (FP-008)
+- Fingerprint: `tools/list` cursor pagination — enumerates servers with 200+ tools (up to 10 pages × N tools) (FP-009)
+- CLI: `discover` / `scan` — incremental JSONL output via `on_result` callback; crash recovery via `--resume` works with partial files (PERF-01)
+- CLI: Rich progress bar with ETA during fingerprinting phase (PERF-07)
+- CLI: `diff` shows **Disappeared** servers (in old run but not in new) (F-03)
+- CLI: `diff` shows **New Tools in Existing Servers** (tool set comparison per server) (F-04)
+- 31 new tests (177 → 208, all passing)
+
+### Fixed
+- Scoring: Wide-surface CRITICAL FP — 50+ getter tools with no auth no longer scores CRITICAL. Auth escalation (HIGH→CRITICAL) now only fires when `capability_tier` is HIGH/CRITICAL from actual dangerous tools, not from structural signals (wide surface, dangerous server name) (SR-05)
+- Scoring: `sampling` capability + FS_READ tools → CRITICAL. Flags autonomous exfiltration vector: LLM can read files and initiate outbound calls without human interaction (SR-06)
+
 ## [0.5.0] — 2026-07-19
 
 ### Added
