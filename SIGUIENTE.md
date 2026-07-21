@@ -130,3 +130,27 @@ Potencial: ~6,756 servers nuevos (2x el pool actual).
 | **PETREL-V07** | Phase 2 — 14 fixes + PyPI v0.6.0 | ✅ CERRADO 2026-07-21 |
 | **Run 3** | `petrel discover --since results-v05.jsonl` con Smithery key → CS17 | pendiente Smithery key |
 | **PETREL-V08** | Phase 3 — Shodan + MCP registries + `petrel watch` | pendiente |
+
+---
+
+## Ekoparty 2026 — CFP Petrel (deadline: 7 agosto para tener margen)
+
+**Estado:** borrador listo en `docs/cfp-ekoparty-2026.md`. Slot 3 disponible en Sessionize (slot 1 = Corvus ✅, slot 2 = Condor ✅).
+
+**Ángulo del talk:** "El scanner que ve lo que Shodan no puede" — dato LATAM-específico fortalece el ángulo regional para Ekoparty Buenos Aires.
+
+**Bloqueante para submit:** Run 3 con filtro LATAM — sin datos regionales el abstract pierde el ángulo geográfico.
+
+### Run 3 — LATAM scan (desbloquea CFP submit)
+
+**Bloqueante único:** Smithery API key (registrarse en smithery.ai — gratuita) → desbloquea ~6,756 candidatos nuevos.
+
+| Paso | Acción |
+|------|--------|
+| 1 | Registrarse smithery.ai → obtener API key gratuita → setear `SMITHERY_API_KEY` en env |
+| 2 | `petrel discover --since results-v06.jsonl` (con Smithery activo) |
+| 3 | Filtrar resultados por geolocation LATAM (AR/BR/MX/CO/CL) vía IP → estadísticas regionales |
+| 4 | Agregar dato LATAM al CFP abstract (`docs/cfp-ekoparty-2026.md`) |
+| 5 | Submit a Sessionize antes del 7 agosto |
+
+**Paralelo al submit:** Run 3 completa → targets nuevos → CS17 (Corvus batch scan con pool extendido).
