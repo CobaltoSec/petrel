@@ -200,6 +200,30 @@ async def test_pypi_search_deduplicates_urls(httpx_mock: HTTPXMock) -> None:
 
 
 @pytest.mark.asyncio
+async def test_pypi_chunked_gather(httpx_mock: HTTPXMock) -> None:
+    """120 MCP packages are processed correctly across multiple chunks of 50."""
+    packages = [f"mcp-server-{i}" for i in range(120)]
+    httpx_mock.add_response(
+        url=_SIMPLE_RE,
+        json={"projects": [{"name": p} for p in packages]},
+        is_reusable=True,
+    )
+    httpx_mock.add_response(
+        url=_PKG_RE,
+        json={
+            "info": {
+                "home_page": "https://chunked-test.example.com",
+                "project_urls": {},
+            }
+        },
+        is_reusable=True,
+    )
+    result = await pypi_search()
+    # 120 packages all return same URL → dedup to 1
+    assert result == ["https://chunked-test.example.com"]
+
+
+@pytest.mark.asyncio
 async def test_pypi_search_skips_non_mcp_packages(httpx_mock: HTTPXMock) -> None:
     """Packages without MCP substrings are filtered before phase 2."""
     httpx_mock.add_response(

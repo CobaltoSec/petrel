@@ -15,12 +15,14 @@ def _extract_urls(hits: list, urls: list[str]) -> None:
     """Append URLs extracted from Censys hit objects into *urls*."""
     for hit in hits:
         ip = hit.get("ip", "")
-        if not ip:
+        hostname = hit.get("name", "")  # primary DNS name (reverse DNS), when available
+        host = hostname if hostname else ip
+        if not host:
             continue
         for svc in hit.get("services", []):
             port = svc.get("port", 443)
             scheme = "https" if port in (443, 8443) else "http"
-            urls.append(f"{scheme}://{ip}:{port}")
+            urls.append(f"{scheme}://{host}:{port}")
 
 
 async def censys_search(max_results: int = 500) -> SourceResult:

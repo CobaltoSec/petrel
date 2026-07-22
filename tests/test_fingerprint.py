@@ -702,3 +702,152 @@ async def test_fp009_cursor_max_10_pages(httpx_mock: HTTPXMock):
 
     # 10 pages × 1 tool = 10 tools
     assert len(tools) == 10
+
+
+# ---------------------------------------------------------------------------
+# FP-011 — response_time_ms tracking
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_fp011_response_time_ms_set(httpx_mock: HTTPXMock):
+    """Confirmed MCP server has response_time_ms set to a non-negative int."""
+    httpx_mock.add_response(
+        method="POST",
+        url="http://timing.example.com/mcp",
+        json=_make_init_response(),
+    )
+    _add_primitives_mocks(httpx_mock, "http://timing.example.com/mcp")
+
+    async with httpx.AsyncClient() as client:
+        record = await probe_url("http://timing.example.com", client)
+
+    assert record is not None
+    assert record.response_time_ms is not None
+    assert isinstance(record.response_time_ms, int)
+    assert record.response_time_ms >= 0
+
+
+# ---------------------------------------------------------------------------
+# FP-012 — Probe failure classification
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_fp012_probe_error_down(httpx_mock: HTTPXMock):
+    """ConnectError → probe_error_type='down', not confirmed MCP."""
+    httpx_mock.add_exception(
+        httpx.ConnectError("Connection refused"),
+        method="POST",
+        url="http://down.example.com/mcp",
+    )
+
+    async with httpx.AsyncClient() as client:
+        record = await probe_url("http://down.example.com", client)
+
+    assert record is not None
+    assert record.probe_error_type == "down"
+    assert not record.is_confirmed_mcp
+
+
+@pytest.mark.asyncio
+async def test_fp012_probe_error_timeout(httpx_mock: HTTPXMock):
+    """ReadTimeout → probe_error_type='timeout', not confirmed MCP."""
+    httpx_mock.add_exception(
+        httpx.ReadTimeout("Read timed out"),
+        method="POST",
+        url="http://slow.example.com/mcp",
+    )
+
+    async with httpx.AsyncClient() as client:
+        record = await probe_url("http://slow.example.com", client)
+
+    assert record is not None
+    assert record.probe_error_type == "timeout"
+    assert not record.is_confirmed_mcp
+
+
+@pytest.mark.asyncio
+async def test_fp012_probe_batch_returns_failure_records(httpx_mock: HTTPXMock):
+    """probe_urls_batch returns MCPServerRecord (not None) for failures."""
+    httpx_mock.add_exception(
+        httpx.ConnectError("refused"),
+        method="POST",
+        url="http://batchdown.example.com/mcp",
+    )
+
+    async with httpx.AsyncClient() as client:
+        results = await probe_urls_batch(["http://batchdown.example.com"], client)
+
+    assert len(results) == 1
+    assert results[0].probe_error_type == "down"
+    assert not results[0].is_confirmed_mcp
+
+
+# ---------------------------------------------------------------------------
+# FP-004 — Basic auth and X-Api-Key-Required header detection
+# ---------------------------------------------------------------------------
+
+def test_fp004_detect_auth_basic():
+    """WWW-Authenticate: Basic → AuthState.REQUIRED."""
+    resp = httpx.Response(401, headers={"www-authenticate": 'Basic realm="restricted"'})
+    auth = _detect_auth(resp)
+    assert auth == AuthState.REQUIRED
+
+
+def test_fp004_detect_auth_api_key_required_header():
+    """X-Api-Key-Required: true → AuthState.API_KEY."""
+    resp = httpx.Response(200, headers={"x-api-key-required": "true"})
+    auth = _detect_auth(resp)
+    assert auth == AuthState.API_KEY
+
+
+def test_fp004_detect_auth_api_key_required_1():
+    """X-Api-Key-Required: 1 → AuthState.API_KEY."""
+    resp = httpx.Response(200, headers={"x-api-key-required": "1"})
+    auth = _detect_auth(resp)
+    assert auth == AuthState.API_KEY
+
+
+# ---------------------------------------------------------------------------
+# FP-006 — Per-domain throttling
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_fp006_domain_semaphore_created_for_railway(httpx_mock: HTTPXMock):
+    """railway.app URLs cause a domain semaphore to be created in _domain_sems."""
+    from petrel.fingerprint.probe import _domain_sems
+
+    httpx_mock.add_exception(
+        httpx.ConnectError("refused"),
+        method="POST",
+        url="http://myapp.railway.app/mcp",
+    )
+
+    async with httpx.AsyncClient() as client:
+        await probe_urls_batch(["http://myapp.railway.app"], client)
+
+    assert ".railway.app" in _domain_sems
+
+
+@pytest.mark.asyncio
+async def test_fp006_non_throttled_domain_no_semaphore(httpx_mock: HTTPXMock):
+    """Non-throttled domains do not create entries in _domain_sems."""
+    from petrel.fingerprint.probe import _domain_sems
+
+    for path in ["/mcp", "/", "/api/mcp", "/api", "/v1/mcp"]:
+        httpx_mock.add_response(
+            method="POST",
+            url=f"http://myapp.example.com{path}",
+            status_code=404,
+        )
+    for path in ["/sse", "/api/sse", "/mcp/sse", "/events"]:
+        httpx_mock.add_response(
+            method="GET",
+            url=f"http://myapp.example.com{path}",
+            status_code=404,
+        )
+
+    async with httpx.AsyncClient() as client:
+        await probe_urls_batch(["http://myapp.example.com"], client)
+
+    # No throttle semaphore created for plain .example.com
+    assert "example.com" not in _domain_sems

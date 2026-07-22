@@ -260,6 +260,8 @@ def discover(
     since: Annotated[Optional[Path], typer.Option("--since", help="Previous results JSONL — skip already-discovered candidates")] = None,
     sarif_out: Annotated[Optional[Path], typer.Option("--sarif", help="Save SARIF 2.1.0 report")] = None,
     html_out: Annotated[Optional[Path], typer.Option("--html", help="Save HTML report")] = None,
+    markdown_out: Annotated[Optional[Path], typer.Option("--markdown", help="Save Markdown table")] = None,
+    csv_out: Annotated[Optional[Path], typer.Option("--csv", help="Save CSV")] = None,
 ) -> None:
     """Discover exposed MCP servers via passive sources (crt.sh + HuggingFace + Censys + GitHub + npm + Smithery + PyPI + FOFA)."""
     console.print(_BANNER)
@@ -323,6 +325,7 @@ def discover(
         # PERF-01: open output file early for incremental writing
         _out_fh = output.open("w", encoding="utf-8") if output else None
         confirmed_for_summary: list[MCPServerRecord] = []
+        raw: list = []
 
         try:
             # PERF-07: progress bar on stderr
@@ -357,6 +360,14 @@ def discover(
             if _out_fh is not None:
                 _out_fh.close()
 
+        # F-07: probe failure count
+        failure_count = sum(
+            1 for r in raw
+            if r is None or (hasattr(r, "is_confirmed_mcp") and not r.is_confirmed_mcp)
+        )
+        if failure_count:
+            console.print(f"[dim]Probe failures: {failure_count} (down/non-MCP/timeout)[/dim]")
+
         # If no output file, build confirmed list from raw
         if not output:
             confirmed_for_summary = [score_server(r) for r in raw if r is not None and r.is_confirmed_mcp]
@@ -380,6 +391,14 @@ def discover(
         from .output.html import write_html
         write_html(records, html_out)
         console.print(f"[dim]HTML report saved to {html_out}[/dim]")
+    if markdown_out and records:
+        from .output.markdown import write_markdown
+        write_markdown(records, markdown_out)
+        console.print(f"[dim]Markdown saved to {markdown_out}[/dim]")
+    if csv_out and records:
+        from .output.csv import write_csv
+        write_csv(records, csv_out)
+        console.print(f"[dim]CSV saved to {csv_out}[/dim]")
 
     # Always emit critical events to CobaltoHQ
     from .output.cobaltohq import emit_critical_servers
@@ -400,6 +419,8 @@ def scan(
     min_risk: Annotated[str, typer.Option("--min-risk")] = "INFO",
     sarif_out: Annotated[Optional[Path], typer.Option("--sarif", help="Save SARIF 2.1.0 report")] = None,
     html_out: Annotated[Optional[Path], typer.Option("--html", help="Save HTML report")] = None,
+    markdown_out: Annotated[Optional[Path], typer.Option("--markdown", help="Save Markdown table")] = None,
+    csv_out: Annotated[Optional[Path], typer.Option("--csv", help="Save CSV")] = None,
 ) -> None:
     """Batch fingerprint MCP servers from a targets file."""
     console.print(_BANNER)
@@ -416,6 +437,7 @@ def scan(
     async def _run() -> list[MCPServerRecord]:
         _out_fh = output.open("w", encoding="utf-8") if output else None
         confirmed: list[MCPServerRecord] = []
+        raw: list = []
 
         try:
             with Progress(
@@ -447,6 +469,14 @@ def scan(
             if _out_fh is not None:
                 _out_fh.close()
 
+        # F-07: probe failure count
+        failure_count = sum(
+            1 for r in raw
+            if r is None or (hasattr(r, "is_confirmed_mcp") and not r.is_confirmed_mcp)
+        )
+        if failure_count:
+            console.print(f"[dim]Probe failures: {failure_count} (down/non-MCP/timeout)[/dim]")
+
         if not output:
             confirmed = [score_server(r) for r in raw if r is not None and r.is_confirmed_mcp]
 
@@ -475,6 +505,14 @@ def scan(
         from .output.html import write_html
         write_html(filtered, html_out)
         console.print(f"[dim]HTML report saved to {html_out}[/dim]")
+    if markdown_out and filtered:
+        from .output.markdown import write_markdown
+        write_markdown(filtered, markdown_out)
+        console.print(f"[dim]Markdown saved to {markdown_out}[/dim]")
+    if csv_out and filtered:
+        from .output.csv import write_csv
+        write_csv(filtered, csv_out)
+        console.print(f"[dim]CSV saved to {csv_out}[/dim]")
 
     # Always emit critical events to CobaltoHQ
     from .output.cobaltohq import emit_critical_servers
@@ -649,6 +687,40 @@ def stats(
             t.add_row(name, str(count))
         console.print(t)
 
+    # F-06: Cloudflare %, tool count distribution, schema completeness %
+    console.print()
+    cf_count = sum(1 for r in records if r.get("behind_cloudflare"))
+    cf_pct = cf_count / len(records) * 100 if records else 0
+    console.print(f"[bold]Behind Cloudflare:[/bold] {cf_count}/{len(records)} ({cf_pct:.1f}%)\n")
+
+    tool_dist: Counter = Counter()
+    for r in records:
+        n = len(r.get("tools", []))
+        if n == 0:
+            bucket = "0"
+        elif n <= 5:
+            bucket = "1-5"
+        elif n <= 20:
+            bucket = "6-20"
+        elif n <= 50:
+            bucket = "21-50"
+        else:
+            bucket = "50+"
+        tool_dist[bucket] += 1
+    _breakdown_table("Tool Count Distribution", tool_dist)
+
+    with_tools = [r for r in records if r.get("tools")]
+    if with_tools:
+        schema_complete = sum(
+            1 for r in with_tools
+            if any(t.get("inputSchema") for t in r.get("tools", []) if isinstance(t, dict))
+        )
+        schema_pct = schema_complete / len(with_tools) * 100
+        console.print(
+            f"[bold]Schema completeness:[/bold] {schema_complete}/{len(with_tools)} "
+            f"servers with tools have inputSchema ({schema_pct:.1f}%)\n"
+        )
+
 
 # ---------------------------------------------------------------------------
 # diff  (C10)
@@ -806,6 +878,8 @@ def report(
     jsonl: Annotated[Path, typer.Argument(help="Petrel results JSONL file")],
     sarif: Annotated[bool, typer.Option("--sarif/--no-sarif", help="Generate SARIF 2.1.0 report")] = True,
     html: Annotated[bool, typer.Option("--html/--no-html", help="Generate HTML report")] = True,
+    markdown: Annotated[bool, typer.Option("--markdown/--no-markdown", help="Generate Markdown table")] = False,
+    csv_fmt: Annotated[bool, typer.Option("--csv/--no-csv", help="Generate CSV")] = False,
     output: Annotated[Optional[Path], typer.Option("--output", "-o", help="Output directory (default: same dir as JSONL)")] = None,
 ) -> None:
     """Generate SARIF and/or HTML reports from a Petrel results JSONL."""
@@ -838,8 +912,20 @@ def report(
         write_html(records, html_path)
         console.print(f"[dim]HTML report saved to {html_path}[/dim]")
 
-    if not sarif and not html:
-        console.print("[yellow]Nothing to generate (both --no-sarif and --no-html).[/yellow]")
+    if markdown:
+        from .output.markdown import write_markdown
+        md_path = out_dir / f"{stem}.md"
+        write_markdown(records, md_path)
+        console.print(f"[dim]Markdown saved to {md_path}[/dim]")
+
+    if csv_fmt:
+        from .output.csv import write_csv
+        csv_path = out_dir / f"{stem}.csv"
+        write_csv(records, csv_path)
+        console.print(f"[dim]CSV saved to {csv_path}[/dim]")
+
+    if not sarif and not html and not markdown and not csv_fmt:
+        console.print("[yellow]Nothing to generate (all formats disabled).[/yellow]")
 
 
 # ---------------------------------------------------------------------------

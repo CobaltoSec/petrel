@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import time
 from typing import Callable
 from urllib.parse import parse_qs, urlparse
 
@@ -43,6 +44,10 @@ _URL_AUTH_PARAMS = frozenset([
     "api_key", "apikey", "token", "access_token", "key", "auth", "secret", "api-key",
 ])
 
+# FP-006: shared hosting platforms where excessive concurrency triggers 429s
+_THROTTLE_DOMAINS = frozenset([".railway.app", ".hf.space", ".fly.dev", ".onrender.com", ".vercel.app"])
+_domain_sems: dict[str, asyncio.Semaphore] = {}
+
 
 def _has_url_auth(url: str) -> bool:
     try:
@@ -58,8 +63,12 @@ def _detect_auth(resp: httpx.Response, url: str = "") -> AuthState:
         return AuthState.BEARER
     if "oauth" in www_auth:
         return AuthState.OAUTH
+    if "basic" in www_auth:
+        return AuthState.REQUIRED  # FP-004: Basic = password required
     if _has_url_auth(url):
         return AuthState.API_KEY
+    if resp.headers.get("x-api-key-required", "").lower() in ("1", "true", "yes"):
+        return AuthState.API_KEY  # FP-004: server self-reports API key requirement
     if resp.status_code == 200:
         return AuthState.NONE
     return AuthState.UNKNOWN
@@ -110,8 +119,12 @@ async def probe_urls_batch(
     concurrency: int = 20,
     source_map: dict[str, str] | None = None,
     on_result: Callable[[MCPServerRecord], None] | None = None,
-) -> list[MCPServerRecord | None]:
+) -> list[MCPServerRecord]:
     """Probe a batch of URLs concurrently.
+
+    Returns one MCPServerRecord per URL. Check ``record.is_confirmed_mcp`` to
+    distinguish confirmed servers from failures; ``record.probe_error_type``
+    gives the failure reason ("down", "timeout", "non_mcp", "error").
 
     Args:
         on_result: Optional callback fired for each confirmed MCP server found.
@@ -119,17 +132,31 @@ async def probe_urls_batch(
     """
     sem = asyncio.Semaphore(concurrency)
 
-    async def _safe_probe(url: str) -> MCPServerRecord | None:
+    async def _safe_probe(url: str) -> MCPServerRecord:
         async with sem:
+            # FP-006: per-domain throttling for shared hosting platforms
+            host = urlparse(url).hostname or ""
+            domain_key = next((d for d in _THROTTLE_DOMAINS if host.endswith(d)), None)
             try:
-                result = await probe_url(url, client)
-                if result is not None and source_map:
-                    result.discovered_via = source_map.get(url, "probe")
-                if result is not None and on_result:
-                    on_result(result)
-                return result
+                if domain_key:
+                    if domain_key not in _domain_sems:
+                        _domain_sems[domain_key] = asyncio.Semaphore(3)
+                    async with _domain_sems[domain_key]:
+                        result = await probe_url(url, client)
+                else:
+                    result = await probe_url(url, client)
             except Exception:
-                return None
+                return MCPServerRecord(url=url, probe_error_type="error")
+
+            # FP-012: probe_url may return None (not MCP) or a failure record
+            if result is None:
+                return MCPServerRecord(url=url, probe_error_type="non_mcp")
+
+            if source_map:
+                result.discovered_via = source_map.get(url, "probe")
+            if on_result and result.is_confirmed_mcp:
+                on_result(result)
+            return result
 
     return list(await asyncio.gather(*[_safe_probe(u) for u in urls]))
 
@@ -138,14 +165,22 @@ async def _probe_streamable(url: str, client: httpx.AsyncClient) -> MCPServerRec
     for path in _STREAMABLE_PATHS:
         endpoint = f"{url}{path}"
         resp = None
+        _t0: float = 0.0
         for _attempt in range(2):  # PERF-05: max 2 attempts — original + 1 retry on 503 cold start
             try:
+                _t0 = time.monotonic()
                 _resp = await client.post(
                     endpoint,
                     json=_INITIALIZE,
                     headers={"Accept": "application/json, text/event-stream"},
                     timeout=httpx.Timeout(connect=3.0, read=8.0, write=5.0, pool=5.0),
                 )
+            except (httpx.ConnectError, httpx.ConnectTimeout):
+                # FP-012: host unreachable — stop immediately, don't try more paths
+                return MCPServerRecord(url=url, probe_error_type="down")
+            except httpx.ReadTimeout:
+                # FP-012: server accepted connection but response timed out
+                return MCPServerRecord(url=url, probe_error_type="timeout")
             except httpx.RequestError:
                 break  # resp stays None → skip path
             if _resp.status_code == 503 and _attempt == 0:
@@ -155,6 +190,9 @@ async def _probe_streamable(url: str, client: httpx.AsyncClient) -> MCPServerRec
             break
         if resp is None or resp.status_code == 503:
             continue
+
+        # FP-011: measure response time for the qualifying response
+        _response_time_ms = int((time.monotonic() - _t0) * 1000)
 
         behind_cf = "cf-ray" in resp.headers
         platform = _detect_platform(resp, url)
@@ -167,6 +205,7 @@ async def _probe_streamable(url: str, client: httpx.AsyncClient) -> MCPServerRec
                 auth_state=detected if detected not in (AuthState.NONE, AuthState.UNKNOWN) else AuthState.REQUIRED,
                 behind_cloudflare=behind_cf,
                 platform=platform,
+                response_time_ms=_response_time_ms,
             )
 
         if resp.status_code != 200:
@@ -188,6 +227,7 @@ async def _probe_streamable(url: str, client: httpx.AsyncClient) -> MCPServerRec
                 behind_cloudflare=behind_cf,
                 platform=platform,
                 endpoint_path=path,
+                response_time_ms=_response_time_ms,
             )
 
         if "protocolVersion" not in result:
@@ -213,6 +253,7 @@ async def _probe_streamable(url: str, client: httpx.AsyncClient) -> MCPServerRec
             server_instructions=result.get("instructions"),
             final_url=final_url,
             redirect_count=len(resp.history),
+            response_time_ms=_response_time_ms,
         )
         tools_result, resources, prompts = await asyncio.gather(
             _get_tools(endpoint, client),
@@ -235,7 +276,9 @@ async def _probe_sse(url: str, client: httpx.AsyncClient) -> MCPServerRecord | N
     for path in _SSE_PATHS:
         endpoint = f"{url}{path}"
         try:
+            _t0 = time.monotonic()
             async with client.stream("GET", endpoint, timeout=httpx.Timeout(connect=3.0, read=5.0, write=5.0, pool=5.0)) as resp:
+                _response_time_ms = int((time.monotonic() - _t0) * 1000)
                 ct = resp.headers.get("content-type", "")
                 if not ct.startswith("text/event-stream"):
                     continue
@@ -263,6 +306,7 @@ async def _probe_sse(url: str, client: httpx.AsyncClient) -> MCPServerRecord | N
                     auth_state=auth,
                     behind_cloudflare=behind_cf,
                     platform=platform,
+                    response_time_ms=_response_time_ms,
                 )
                 msg_endpoint = url + session_path
                 try:

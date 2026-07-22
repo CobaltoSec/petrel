@@ -567,3 +567,114 @@ def test_f04_diff_new_tools_in_existing(tmp_path: Path):
     assert result.exit_code == 0, result.output
     assert "brand_new_tool" in result.output
     assert "New Tools" in result.output
+
+
+# ---------------------------------------------------------------------------
+# F-06: stats — Cloudflare %, tool count distribution, schema completeness
+# ---------------------------------------------------------------------------
+
+_CF_RECORD = dict(
+    _CRITICAL_RECORD,
+    url="https://cf.example.com",
+    behind_cloudflare=True,
+    tools=[{"name": "run_bash", "risk_tier": "CRITICAL", "schema_risk_params": [], "inputSchema": {"type": "object"}}],
+)
+
+_NO_TOOLS_RECORD = dict(
+    _LOW_RECORD,
+    url="https://notools.example.com",
+    tools=[],
+    behind_cloudflare=False,
+)
+
+
+def test_stats_cloudflare_percentage(tmp_path: Path):
+    """F-06: stats shows Cloudflare percentage."""
+    records = [_CF_RECORD, _NO_TOOLS_RECORD]
+    jsonl = _make_jsonl(tmp_path, records)
+
+    result = runner.invoke(app, ["stats", str(jsonl)])
+
+    assert result.exit_code == 0, result.output
+    assert "Cloudflare" in result.output
+    # 1 out of 2 behind Cloudflare = 50%
+    assert "50.0%" in result.output
+
+
+def test_stats_tool_count_distribution(tmp_path: Path):
+    """F-06: stats shows tool count distribution buckets."""
+    records = [_CRITICAL_RECORD, _NO_TOOLS_RECORD]
+    jsonl = _make_jsonl(tmp_path, records)
+
+    result = runner.invoke(app, ["stats", str(jsonl)])
+
+    assert result.exit_code == 0, result.output
+    assert "Tool Count Distribution" in result.output
+    # One server has 1 tool (1-5 bucket), one has 0 tools (0 bucket)
+    assert "1-5" in result.output or "0" in result.output
+
+
+def test_stats_schema_completeness(tmp_path: Path):
+    """F-06: stats shows schema completeness % for servers with tools."""
+    # _CF_RECORD has a tool with inputSchema, _CRITICAL_RECORD has tool without inputSchema
+    records = [_CF_RECORD, _CRITICAL_RECORD]
+    jsonl = _make_jsonl(tmp_path, records)
+
+    result = runner.invoke(app, ["stats", str(jsonl)])
+
+    assert result.exit_code == 0, result.output
+    assert "Schema completeness" in result.output
+
+
+# ---------------------------------------------------------------------------
+# F-08: Markdown + CSV output
+# ---------------------------------------------------------------------------
+
+def test_markdown_output(tmp_path: Path):
+    """F-08: write_markdown produces a valid Markdown table."""
+    from petrel.output.markdown import write_markdown
+    from petrel.models import MCPServerRecord, Protocol, AuthState, RiskTier, Platform
+
+    record = MCPServerRecord(
+        url="https://test.example.com",
+        protocol=Protocol.STREAMABLE_HTTP,
+        auth_state=AuthState.NONE,
+        risk_tier=RiskTier.CRITICAL,
+        platform=Platform.VERCEL,
+    )
+    out = tmp_path / "out.md"
+    write_markdown([record], out)
+
+    content = out.read_text()
+    assert "| URL |" in content
+    assert "test.example.com" in content
+    assert "CRITICAL" in content
+    assert "vercel" in content
+
+
+def test_csv_output(tmp_path: Path):
+    """F-08: write_csv produces valid CSV with correct fields."""
+    import csv as csv_mod
+    from petrel.output.csv import write_csv
+    from petrel.models import MCPServerRecord, Protocol, AuthState, RiskTier, Platform
+
+    record = MCPServerRecord(
+        url="https://test.example.com",
+        protocol=Protocol.STREAMABLE_HTTP,
+        auth_state=AuthState.NONE,
+        risk_tier=RiskTier.HIGH,
+        platform=Platform.RAILWAY,
+        priority_score=75,
+    )
+    out = tmp_path / "out.csv"
+    write_csv([record], out)
+
+    content = out.read_text()
+    reader = list(csv_mod.DictReader(content.splitlines()))
+    assert len(reader) == 1
+    row = reader[0]
+    assert row["url"] == "https://test.example.com"
+    assert row["risk_tier"] == "HIGH"
+    assert row["auth_state"] == "none"
+    assert row["protocol"] == "streamable-http"
+    assert row["priority_score"] == "75"

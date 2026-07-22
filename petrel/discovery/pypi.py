@@ -47,13 +47,18 @@ async def pypi_search() -> SourceResult:
         except Exception as e:
             return SourceResult(urls=[], error=str(e))
 
+    # Phase 2: per-package metadata — shared client + chunked gather of 50
+    # PERF-06: one AsyncClient shared across all package fetches (was one per package)
+    # DISC-010: process in chunks of 50 to cap simultaneous task creation
     sem = asyncio.Semaphore(10)
+    all_urls: list[str] = []
+    _CHUNK = 50
 
-    async def _fetch_pkg(name: str) -> list[str]:
-        async with sem:
-            async with httpx.AsyncClient(timeout=10.0, headers={"User-Agent": _USER_AGENT}) as c:
+    async with httpx.AsyncClient(timeout=10.0, headers={"User-Agent": _USER_AGENT}) as client:
+        async def _fetch_pkg(name: str) -> list[str]:
+            async with sem:
                 try:
-                    r = await c.get(_PKG_JSON_URL.format(name))
+                    r = await client.get(_PKG_JSON_URL.format(name))
                     if r.status_code != 200:
                         return []
                     info = r.json().get("info", {})
@@ -69,6 +74,9 @@ async def pypi_search() -> SourceResult:
                 except Exception:
                     return []
 
-    batches = await asyncio.gather(*[_fetch_pkg(n) for n in candidates])
-    all_urls = [u for batch in batches for u in batch]
+        for i in range(0, len(candidates), _CHUNK):
+            chunk = candidates[i : i + _CHUNK]
+            batches = await asyncio.gather(*[_fetch_pkg(n) for n in chunk])
+            all_urls.extend(u for b in batches for u in b)
+
     return SourceResult(urls=list(dict.fromkeys(all_urls)))

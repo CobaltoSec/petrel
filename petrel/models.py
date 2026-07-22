@@ -131,6 +131,10 @@ class MCPServerRecord(BaseModel):
     # M3 — hosting platform
     platform: Platform = Platform.UNKNOWN
 
+    # M4 — probe metadata
+    response_time_ms: int | None = None
+    probe_error_type: str | None = None  # "down" | "timeout" | "non_mcp" | "error"
+
     @property
     def is_confirmed_mcp(self) -> bool:
         return self.protocol != Protocol.UNKNOWN

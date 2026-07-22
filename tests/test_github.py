@@ -111,6 +111,25 @@ async def test_github_stops_on_422(httpx_mock: HTTPXMock):
 
 
 @pytest.mark.asyncio
+async def test_github_parallel_queries(httpx_mock: HTTPXMock):
+    """Queries run in parallel; cross-query deduplication still works."""
+    httpx_mock.add_response(
+        url=_GH_URL,
+        json={
+            "items": [
+                {"homepage": "https://shared.railway.app"},
+                {"homepage": "https://unique-per-call.fly.dev"},
+            ]
+        },
+        is_reusable=True,
+    )
+    urls = await github_search(["q1", "q2", "q3"])
+    # shared URL appears in all 3 query results → deduped to 1
+    assert urls.count("https://shared.railway.app") == 1
+    assert urls.count("https://unique-per-call.fly.dev") == 1
+
+
+@pytest.mark.asyncio
 async def test_github_stops_at_partial_page(httpx_mock: HTTPXMock):
     items = [{"homepage": f"https://server-{i}.fly.dev"} for i in range(50)]
     httpx_mock.add_response(url=_GH_URL, json={"items": items})

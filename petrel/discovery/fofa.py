@@ -2,10 +2,13 @@
 from __future__ import annotations
 import base64
 import os
+import re
 
 import httpx
 
 from ..models import SourceResult
+
+_IP_RE = re.compile(r"^\d+\.\d+\.\d+\.\d+$")
 
 _API = "https://fofa.info/api/v1/search/all"
 _QUERY = 'body="2024-11-05"'
@@ -33,7 +36,7 @@ async def fofa_search(max_results: int = 500) -> SourceResult:
                     "key": key,
                     "qbase64": qb64,
                     "size": min(max_results, 10000),
-                    "fields": "ip,port,protocol",
+                    "fields": "host,ip,port,protocol",
                     "full": "false",
                 },
             )
@@ -41,12 +44,14 @@ async def fofa_search(max_results: int = 500) -> SourceResult:
                 return SourceResult(urls=[])
             urls: list[str] = []
             for item in resp.json().get("results", []):
-                # item = [ip, port, protocol]
-                if len(item) < 3:
+                # item = [host, ip, port, protocol]
+                if len(item) < 4:
                     continue
-                ip, port, proto = str(item[0]), str(item[1]), str(item[2])
+                host_field, ip, port, proto = str(item[0]), str(item[1]), str(item[2]), str(item[3])
                 scheme = "https" if proto == "https" or port in ("443", "8443") else "http"
-                urls.append(f"{scheme}://{ip}:{port}")
+                # prefer hostname when available (not a raw IP), fall back to IP
+                address = host_field if host_field and not _IP_RE.match(host_field) else ip
+                urls.append(f"{scheme}://{address}:{port}")
             return SourceResult(urls=list(dict.fromkeys(urls)))
         except Exception as e:
             return SourceResult(urls=[], error=str(e))

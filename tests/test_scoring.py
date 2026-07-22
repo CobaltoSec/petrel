@@ -638,3 +638,84 @@ def test_sr06_fs_read_only_no_sampling_unchanged():
     result = score_server(record)
     assert result.risk_tier == RiskTier.MEDIUM
     assert not any("autonomous exfiltration" in r for r in result.risk_reasons)
+
+
+# ---------------------------------------------------------------------------
+# SR-09 — CRITICAL tools as implicit exec-family
+# ---------------------------------------------------------------------------
+
+def test_sr09_critical_tool_triggers_exec_cluster():
+    """Tool with CRITICAL score (via description) + NETWORK tool → exfiltration cluster."""
+    record = MCPServerRecord(
+        url="http://x.example.com",
+        auth_state=AuthState.BEARER,
+        tools=[
+            MCPTool(
+                name="my_helper",
+                description="This tool can execute arbitrary shell commands via subprocess",
+            ),
+            MCPTool(name="fetch_url"),
+        ],
+    )
+    result = score_server(record)
+    assert result.risk_tier == RiskTier.CRITICAL
+    assert any("exfiltration cluster" in r for r in result.risk_reasons)
+
+
+def test_sr09_critical_tool_no_network_no_cluster():
+    """CRITICAL tool alone (no NETWORK/MESSAGING) → no exfiltration cluster reason."""
+    record = MCPServerRecord(
+        url="http://x.example.com",
+        auth_state=AuthState.BEARER,
+        tools=[
+            MCPTool(
+                name="my_helper",
+                description="This tool can execute arbitrary shell commands via subprocess",
+            ),
+        ],
+    )
+    result = score_server(record)
+    assert not any("exfiltration cluster" in r for r in result.risk_reasons)
+
+
+# ---------------------------------------------------------------------------
+# SR-10 — Anonymous server signal
+# ---------------------------------------------------------------------------
+
+def test_sr10_anonymous_server_reason():
+    """Server with no name, no tools, auth=NONE, confirmed MCP → anonymous server reason."""
+    record = MCPServerRecord(
+        url="http://anon.example.com",
+        protocol=Protocol.STREAMABLE_HTTP,
+        auth_state=AuthState.NONE,
+        server_name=None,
+        tools=[],
+    )
+    result = score_server(record)
+    assert any("anonymous server" in r for r in result.risk_reasons)
+
+
+def test_sr10_not_flagged_when_has_tools():
+    """Server with tools but no name → anonymous server NOT flagged."""
+    record = MCPServerRecord(
+        url="http://anon.example.com",
+        protocol=Protocol.STREAMABLE_HTTP,
+        auth_state=AuthState.NONE,
+        server_name=None,
+        tools=[MCPTool(name="get_weather")],
+    )
+    result = score_server(record)
+    assert not any("anonymous server" in r for r in result.risk_reasons)
+
+
+def test_sr10_not_flagged_when_protocol_unknown():
+    """Protocol.UNKNOWN (probe failed) → anonymous server NOT flagged."""
+    record = MCPServerRecord(
+        url="http://anon.example.com",
+        protocol=Protocol.UNKNOWN,
+        auth_state=AuthState.NONE,
+        server_name=None,
+        tools=[],
+    )
+    result = score_server(record)
+    assert not any("anonymous server" in r for r in result.risk_reasons)

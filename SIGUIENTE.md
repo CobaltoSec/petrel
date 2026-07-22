@@ -1,8 +1,8 @@
 # Petrel — Siguiente
 
-## Estado: v0.7.0 (2026-07-22) — 212/212 tests ✅
+## Estado: v0.8.0 (2026-07-22) — 237/237 tests ✅
 
-Repo: `github.com/CobaltoSec/petrel` · PyPI: `cobaltosec-petrel v0.6.0` ✅
+Repo: `github.com/CobaltoSec/petrel` · PyPI: `cobaltosec-petrel v0.6.0` ✅ (v0.8.0 pendiente token)
 
 ---
 
@@ -131,6 +131,8 @@ Potencial: ~6,756 servers nuevos (2x el pool actual).
 | **PETREL-RUN3** | Smithery API fix + Run 3: 464 confirmados, targets-v07.yaml → CS17 | ✅ CERRADO 2026-07-21 |
 | **PETREL-V08** | Phase 3 — 10 fixes + v0.7.0 | ✅ CERRADO 2026-07-22 |
 | **PETREL-CFP-LATAM** | CFP Ekoparty 2026 — abstract + slides + submit Sessionize | ✅ CERRADO 2026-07-22 |
+| **PETREL-V09** | Phase 4 — 13 fixes + v0.8.0, 237 tests | ✅ CERRADO 2026-07-22 |
+| **PETREL-RUN4** | Run 4 con v0.8.0 → targets-v08.yaml → CS17 | ⏳ próximo |
 
 ---
 
@@ -147,22 +149,31 @@ Potencial: ~6,756 servers nuevos (2x el pool actual).
 
 ---
 
-## PETREL-V09 — Phase 4 backlog (próximo bloque)
+## PETREL-V09 — ✅ CERRADO (2026-07-22)
 
-**Objetivo:** 13 mejoras de calidad/performance del backlog → v0.8.0.
+**13 fixes Phase 4 backlog → v0.8.0. 212→237 tests.**
 
-| ID | Fix | Tamaño | Impacto |
-|----|-----|--------|---------|
-| PERF-06 | pypi.py: un solo httpx.AsyncClient compartido (en lugar de uno por package) | S | MEDIUM |
-| DISC-010 | PyPI: chunked gather de 50 (en lugar de gather sobre toda la lista) | S | MEDIUM |
-| SR-09 | Cluster detection: incluir tools con tier CRITICAL como implicit exec-family | S | HIGH |
-| SR-10 | Anonymous server signal (no name, no tools, no auth → explicit flag) | XS | MEDIUM |
-| FP-004 | Basic auth detection + custom header hints (X-Api-Key-Required) | XS | MEDIUM |
-| FP-006 | Per-domain throttling (shared hosts: railway.app, hf.space → Semaphore(3)) | M | MEDIUM |
-| FP-011 | response_time_ms tracking en MCPServerRecord | XS | LOW |
-| FP-012 | Probe failure classification: down vs non-MCP vs timeout | S | MEDIUM |
-| DISC-012 | Censys/FOFA: usar hostname en lugar de raw IP:port para virtual hosting | S | MEDIUM |
-| F-06 | stats: schema completeness %, tool count distribution, Cloudflare % | XS | LOW |
-| F-07 | Error reporting: probe failure count en summary | XS | LOW |
-| F-08 | Markdown + CSV output formats | S | LOW |
-| PERF-08 | GitHub discovery: 4 queries en paralelo (con GITHUB_TOKEN) | S | MEDIUM |
+- SR-09: CRITICAL tools → exec cluster implícito ✅
+- SR-10: Anonymous server signal ✅
+- FP-004: Basic auth + X-Api-Key-Required ✅
+- FP-006: Per-domain throttling railway/hf.space/fly/onrender/vercel ✅
+- FP-011: response_time_ms en MCPServerRecord ✅
+- FP-012: probe_error_type (down/timeout/non_mcp/error) ✅
+- DISC-010: PyPI chunked gather 50 ✅
+- DISC-012: Censys hostname + FOFA host field ✅
+- PERF-06: pypi.py shared AsyncClient ✅
+- PERF-08: GitHub 4 queries paralelo ✅
+- F-06: stats Cloudflare % + tool dist + schema completeness ✅
+- F-07: probe failure count en discover/scan summary ✅
+- F-08: --markdown + --csv en discover/scan/report ✅
+
+---
+
+## PETREL-RUN4 — próximo bloque
+
+**Objetivo:** Run 4 con v0.8.0 — nueva scan aprovechando mejoras de discovery y scoring.
+
+- D1: `petrel discover` con v0.8.0 — verificar Censys hostnames + FOFA hostnames + GitHub parallel
+- D2: Comparar con results-v07.jsonl via `petrel diff` — nuevos servers, desaparecidos
+- D3: `petrel feed-corvus results-v08.jsonl` → targets-v08.yaml → CS17
+- D4 (opcional): Publicar cobaltosec-petrel v0.8.0 en PyPI (requiere token manual)

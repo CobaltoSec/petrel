@@ -124,10 +124,15 @@ async def github_search(
         seen: set[str] = set()
         result: list[str] = []
         try:
-            for i, query in enumerate(queries):
-                if i > 0:
-                    await asyncio.sleep(delay)
-                for url in await _fetch_query(query):
+            # PERF-08: run all queries concurrently instead of sequentially
+            query_results = await asyncio.gather(
+                *[_fetch_query(q) for q in queries],
+                return_exceptions=True,
+            )
+            for qr in query_results:
+                if isinstance(qr, Exception):
+                    continue
+                for url in qr:
                     if url not in seen:
                         seen.add(url)
                         result.append(url)

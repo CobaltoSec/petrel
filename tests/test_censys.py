@@ -104,3 +104,37 @@ async def test_non_200_page2_returns_partial(httpx_mock: HTTPXMock, monkeypatch)
     # Page 1 results must be present despite page 2 failure
     assert "https://1.2.3.4:443" in urls
     assert len(urls) == 1
+
+
+# ---------------------------------------------------------------------------
+# DISC-012: hostname preferred over raw IP when available
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_censys_hostname_preferred(httpx_mock: HTTPXMock, monkeypatch):
+    """DISC-012: When hit has 'name' field (DNS), URL uses hostname not raw IP."""
+    monkeypatch.setenv("CENSYS_API_ID", "test_id")
+    monkeypatch.setenv("CENSYS_API_SECRET", "test_secret")
+    hit_with_name = {"ip": "1.2.3.4", "name": "mcp.example.com", "services": [{"port": 443}]}
+    httpx_mock.add_response(
+        url=_CENSYS_RE,
+        json=_page([hit_with_name], cursor=None),
+        is_reusable=True,
+    )
+    urls = await censys_search()
+    assert "https://mcp.example.com:443" in urls
+    assert "https://1.2.3.4:443" not in urls
+
+
+@pytest.mark.asyncio
+async def test_censys_fallback_to_ip_when_no_name(httpx_mock: HTTPXMock, monkeypatch):
+    """DISC-012: When hit has no 'name' field, falls back to raw IP."""
+    monkeypatch.setenv("CENSYS_API_ID", "test_id")
+    monkeypatch.setenv("CENSYS_API_SECRET", "test_secret")
+    httpx_mock.add_response(
+        url=_CENSYS_RE,
+        json=_page([_HIT_A], cursor=None),
+        is_reusable=True,
+    )
+    urls = await censys_search()
+    assert "https://1.2.3.4:443" in urls

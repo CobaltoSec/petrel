@@ -1,1 +1,1 @@
-"""Petrel output formatters: SARIF, HTML, CobaltoHQ."""
+"""Petrel output formatters: SARIF, HTML, CobaltoHQ, Markdown, CSV."""

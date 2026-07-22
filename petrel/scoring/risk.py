@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 from urllib.parse import urlparse
 
-from ..models import AuthState, MCPServerRecord, MCPTool, Platform, RiskTier, worst_tier
+from ..models import AuthState, MCPServerRecord, MCPTool, Platform, Protocol, RiskTier, worst_tier
 
 # ---------------------------------------------------------------------------
 # S1 — Description-based phrases
@@ -111,8 +111,10 @@ _FAMILY_MESSAGING = frozenset([
 
 def _detect_clusters(tools: list) -> list[tuple[RiskTier, str]]:
     names = {t.name.lower() for t in tools}
+    # SR-09: tools individually scored CRITICAL count as implicit exec-family
+    critical_names = {t.name.lower() for t in tools if t.risk_tier == RiskTier.CRITICAL}
     findings: list[tuple[RiskTier, str]] = []
-    exec_hits = sorted(names & _FAMILY_CODE_EXEC)
+    exec_hits = sorted((names & _FAMILY_CODE_EXEC) | critical_names)
     net_hits = sorted(names & _FAMILY_NETWORK)
     msg_hits = sorted(names & _FAMILY_MESSAGING)
     fs_read_hits = sorted(names & _FAMILY_FS_READ)
@@ -349,6 +351,13 @@ def score_server(record: MCPServerRecord) -> MCPServerRecord:
     if record.auth_state == AuthState.API_KEY:
         server_tier = worst_tier(server_tier, RiskTier.MEDIUM)
         reasons.append("API key exposed in URL query parameters (visible in logs/proxies)")
+
+    # SR-10: anonymous server signal
+    if (not record.server_name
+            and not record.tools
+            and record.auth_state == AuthState.NONE
+            and record.protocol != Protocol.UNKNOWN):
+        reasons.append("anonymous server: no name, no tools, no auth")
 
     record.risk_tier = server_tier
     record.risk_reasons = reasons

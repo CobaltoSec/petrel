@@ -2,6 +2,33 @@
 
 ## [Unreleased]
 
+## [PETREL-V09] — 2026-07-22
+
+### Added
+- Scoring: CRITICAL-scored tools count as implicit exec-family in cluster detection — servers with custom dangerous tools (not in name list) now trigger exfiltration clusters (SR-09)
+- Scoring: anonymous server signal — servers with no name, no tools, and no auth get `"anonymous server"` in risk_reasons (SR-10)
+- Fingerprint: Basic auth detection — `WWW-Authenticate: Basic` → `AuthState.REQUIRED` (FP-004)
+- Fingerprint: `X-Api-Key-Required` header hint → `AuthState.API_KEY` (FP-004)
+- Fingerprint: per-domain throttling for shared platforms — `.railway.app`, `.hf.space`, `.fly.dev`, `.onrender.com`, `.vercel.app` → `Semaphore(3)` per domain (FP-006)
+- Fingerprint: `response_time_ms` field in `MCPServerRecord` — latency captured via `time.monotonic()` on first successful probe (FP-011)
+- Fingerprint: probe failure classification — `probe_error_type`: `"down"` / `"timeout"` / `"non_mcp"` / `"error"` in `MCPServerRecord`. `probe_urls_batch` now returns failure records instead of None (FP-012)
+- Discovery: Censys uses `hit["name"]` (primary DNS name) when available, falls back to raw IP (DISC-012)
+- Discovery: FOFA requests `host` field — uses hostname when not a raw IP address (DISC-012)
+- Discovery: GitHub — 4 search queries now run concurrently via `asyncio.gather` (PERF-08)
+- CLI: `stats` — Cloudflare %, tool count distribution (0/1-5/6-20/21-50/50+), schema completeness % (F-06)
+- CLI: `discover`/`scan` — probe failure count in summary (down/non-MCP/timeout) (F-07)
+- CLI: `--markdown`/`--csv` flags in `discover`, `scan`, `report` commands (F-08)
+- Output: `petrel/output/markdown.py` — pipe-delimited Markdown table (F-08)
+- Output: `petrel/output/csv.py` — 8-field CSV output (F-08)
+
+### Performance
+- Discovery: `pypi.py` — single shared `httpx.AsyncClient` for all per-package fetches (was one client per package, ~1,972/run) (PERF-06)
+- Discovery: `pypi.py` — chunked `asyncio.gather` of 50 packages (was full list of 1,972+ at once) (DISC-010)
+
+## [0.8.0] — 2026-07-22
+
+_(PyPI publish pendiente — token requerido)_
+
 ## [PETREL-CFP-LATAM] — 2026-07-22
 
 ### Research
