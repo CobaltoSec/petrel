@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+## [PETREL-RUN3] — 2026-07-21
+
+### Fixed
+- Discovery: Smithery.ai — migrado de `smithery.ai/api/v1/servers` (404) a `api.smithery.ai/servers`. Nueva paginación `pagination.currentPage/totalPages`. Extrae `homepage` del listado en lugar de `connections[].deploymentUrl` (todos apuntan a `*.run.tools`, inaccesibles sin auth Smithery). 118 candidatos → 45 confirmados (38% conversión, mejor ratio de todas las fuentes)
+- Tests: smithery tests reescritos para nueva API — 12 tests, todos passing (212/212 total)
+
+### Run 3 (2026-07-21)
+- 3,948 candidatos (PyPI 2001 + GitHub 938 + HuggingFace 565 + Smithery 118 + npm 469 + crt.sh 1) → 464 confirmados (11.7%)
+- 41 CRITICAL, 4 HIGH, 61 LOW, 358 INFO — 106 sin auth
+- Smithery: 45 de sus 118 candidatos son MCP servers reales (38% — nuevos: theagenttimes.com, ucpg.ai, vivaldo.shop, xqb.io/mcp, emblemvault.ai)
+- Outputs: `results-v07.jsonl`, `results-v07.sarif`, `results-v07.html`, `targets-v07.yaml` (450 targets HTTP para CS17)
+
 ## [0.6.0] — 2026-07-21
 
 ### Added

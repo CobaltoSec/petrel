@@ -1,6 +1,6 @@
 # Petrel — Siguiente
 
-## Estado: v0.6.0 (2026-07-21) — 208/208 tests ✅
+## Estado: v0.6.0 (2026-07-21) — 212/212 tests ✅
 
 Repo: `github.com/CobaltoSec/petrel` · PyPI: `cobaltosec-petrel v0.6.0` ✅
 
@@ -128,7 +128,7 @@ Potencial: ~6,756 servers nuevos (2x el pool actual).
 |--------|-----------|--------|
 | **CS16** | Corvus batch scan `targets-v05.yaml` | ✅ CERRADO 2026-07-20 |
 | **PETREL-V07** | Phase 2 — 14 fixes + PyPI v0.6.0 | ✅ CERRADO 2026-07-21 |
-| **Run 3** | `petrel discover --since results-v05.jsonl` con Smithery key → CS17 | pendiente Smithery key |
+| **PETREL-RUN3** | Smithery API fix + Run 3: 464 confirmados, targets-v07.yaml → CS17 | ✅ CERRADO 2026-07-21 |
 | **PETREL-V08** | Phase 3 — Shodan + MCP registries + `petrel watch` | pendiente |
 
 ---
@@ -143,14 +143,12 @@ Potencial: ~6,756 servers nuevos (2x el pool actual).
 
 ### Run 3 — LATAM scan (desbloquea CFP submit)
 
-**Bloqueante único:** Smithery API key (registrarse en smithery.ai — gratuita) → desbloquea ~6,756 candidatos nuevos.
+**Run 3 completada (2026-07-21):** 464 confirmados, 41 CRITICAL, Smithery aportó 45 servers reales (38% conversión). `targets-v07.yaml` listo para CS17.
+
+**Pendiente para CFP:** filtro geolocation LATAM (AR/BR/MX/CO/CL) vía IP sobre `results-v07.jsonl` → estadísticas regionales → actualizar `docs/cfp-ekoparty-2026.md` → submit Sessionize.
 
 | Paso | Acción |
 |------|--------|
-| 1 | Registrarse smithery.ai → obtener API key gratuita → setear `SMITHERY_API_KEY` en env |
-| 2 | `petrel discover --since results-v06.jsonl` (con Smithery activo) |
-| 3 | Filtrar resultados por geolocation LATAM (AR/BR/MX/CO/CL) vía IP → estadísticas regionales |
-| 4 | Agregar dato LATAM al CFP abstract (`docs/cfp-ekoparty-2026.md`) |
-| 5 | Submit a Sessionize antes del 7 agosto |
-
-**Paralelo al submit:** Run 3 completa → targets nuevos → CS17 (Corvus batch scan con pool extendido).
+| 1 | `petrel stats results-v07.jsonl` + geolocate IPs con MaxMind/ipapi → filtrar LATAM |
+| 2 | Agregar dato LATAM al CFP abstract (`docs/cfp-ekoparty-2026.md`) |
+| 3 | Submit a Sessionize antes del 7 agosto |
