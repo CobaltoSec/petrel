@@ -1,9 +1,10 @@
 """Risk scoring for MCP tools and servers."""
 from __future__ import annotations
 
+import re
 from urllib.parse import urlparse
 
-from ..models import AuthState, MCPServerRecord, MCPTool, RiskTier, worst_tier
+from ..models import AuthState, MCPServerRecord, MCPTool, Platform, RiskTier, worst_tier
 
 # ---------------------------------------------------------------------------
 # S1 — Description-based phrases
@@ -50,7 +51,7 @@ def _is_unconstrained_string(prop_schema: dict) -> bool:
     return not any(k in prop_schema for k in ("pattern", "enum", "minLength", "maxLength", "format"))
 
 
-def _score_from_schema(schema: dict | None) -> tuple[RiskTier, list[str]]:
+def _score_from_schema(schema: dict | None, _depth: int = 0) -> tuple[RiskTier, list[str]]:
     if not schema:
         return RiskTier.INFO, []
     props = schema.get("properties", {})
@@ -71,6 +72,17 @@ def _score_from_schema(schema: dict | None) -> tuple[RiskTier, list[str]]:
             tier = worst_tier(tier, RiskTier.HIGH if unconstrained else RiskTier.MEDIUM)
             if unconstrained:
                 dangerous_params.append(param_name)
+        # Recurse into nested object schemas (cap at depth 3, skip $ref)
+        if (
+            _depth < 3
+            and isinstance(prop_schema, dict)
+            and prop_schema.get("type") == "object"
+            and "properties" in prop_schema
+            and "$ref" not in prop_schema
+        ):
+            nested_tier, nested_params = _score_from_schema(prop_schema, _depth + 1)
+            tier = worst_tier(tier, nested_tier)
+            dangerous_params.extend(nested_params)
     return tier, dangerous_params
 
 
@@ -203,6 +215,35 @@ def _score_from_name(name: str) -> RiskTier:
 
 
 # ---------------------------------------------------------------------------
+# SR-07 — server_instructions injection / credential leak scoring
+# ---------------------------------------------------------------------------
+_INJECT_PATTERNS = frozenset([
+    "ignore previous", "disregard instructions", "system prompt", "you are now",
+    "forget your", "new persona", "act as", "jailbreak",
+])
+_CRED_KEYWORDS = frozenset(["password", "api_key", "secret", "token", "credentials"])
+
+
+def _score_server_instructions(text: str | None) -> tuple[RiskTier, list[str]]:
+    if not text or not text.strip():
+        return RiskTier.INFO, []
+    text_lower = text.lower()
+    tier = RiskTier.INFO
+    reasons: list[str] = []
+    # CRITICAL: injection patterns (substring match)
+    matched_inject = [p for p in _INJECT_PATTERNS if p in text_lower]
+    if matched_inject:
+        tier = worst_tier(tier, RiskTier.CRITICAL)
+        reasons.append(f"server_instructions injection pattern(s): {sorted(matched_inject)}")
+    # HIGH: credential keyword followed by = or : with a non-whitespace value
+    for keyword in _CRED_KEYWORDS:
+        if re.search(rf'\b{re.escape(keyword)}\s*[=:]\s*\S+', text_lower):
+            tier = worst_tier(tier, RiskTier.HIGH)
+            reasons.append(f"potential credential leak in server_instructions: '{keyword}'")
+    return tier, reasons
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -275,6 +316,12 @@ def score_server(record: MCPServerRecord) -> MCPServerRecord:
         capability_tier = worst_tier(capability_tier, RiskTier.CRITICAL)
         reasons.append("autonomous exfiltration: sampling + filesystem read")
 
+    # SR-07: server_instructions injection / credential leak → capability
+    si_tier, si_reasons = _score_server_instructions(record.server_instructions)
+    if si_tier != RiskTier.INFO:
+        capability_tier = worst_tier(capability_tier, si_tier)
+        reasons.extend(si_reasons)
+
     # Combined server tier: both capability and structural signals contribute.
     server_tier = worst_tier(capability_tier, structural_tier)
 
@@ -305,4 +352,22 @@ def score_server(record: MCPServerRecord) -> MCPServerRecord:
 
     record.risk_tier = server_tier
     record.risk_reasons = reasons
+
+    # SR-08: Numeric priority score 0-100
+    _TIER_BASE = {"CRITICAL": 80, "HIGH": 60, "MEDIUM": 40, "LOW": 20, "INFO": 0}
+    base = _TIER_BASE.get(
+        record.risk_tier.value if hasattr(record.risk_tier, "value") else str(record.risk_tier), 0
+    )
+    bonus = 0
+    # +15 if no auth and tier >= HIGH
+    if record.auth_state == AuthState.NONE and base >= 60:
+        bonus += 15
+    # +5 if any tool has exec signal
+    if tool_names_lower & _FAMILY_CODE_EXEC:
+        bonus += 5
+    # +3 if platform is Railway/Fly/HuggingFace/Vercel
+    if record.platform in (Platform.RAILWAY, Platform.FLY, Platform.HUGGINGFACE, Platform.VERCEL):
+        bonus += 3
+    record.priority_score = min(100, base + bonus)
+
     return record

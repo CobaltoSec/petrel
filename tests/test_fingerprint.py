@@ -610,7 +610,7 @@ async def test_fp008_tool_annotations_populated(httpx_mock: HTTPXMock):
     )
 
     async with httpx.AsyncClient() as client:
-        tools = await _get_tools("http://ann8a.example.com/mcp", client)
+        tools, _ = await _get_tools("http://ann8a.example.com/mcp", client)
 
     assert len(tools) == 1
     assert tools[0].annotations == {"readOnly": True, "safe": True}
@@ -628,7 +628,7 @@ async def test_fp008_tool_no_annotations_is_none(httpx_mock: HTTPXMock):
     )
 
     async with httpx.AsyncClient() as client:
-        tools = await _get_tools("http://ann8b.example.com/mcp", client)
+        tools, _ = await _get_tools("http://ann8b.example.com/mcp", client)
 
     assert len(tools) == 1
     assert tools[0].annotations is None
@@ -661,7 +661,7 @@ async def test_fp009_cursor_pagination_two_pages(httpx_mock: HTTPXMock):
     )
 
     async with httpx.AsyncClient() as client:
-        tools = await _get_tools("http://cur9a.example.com/mcp", client)
+        tools, _ = await _get_tools("http://cur9a.example.com/mcp", client)
 
     assert len(tools) == 5
     assert [t.name for t in tools] == ["t1", "t2", "t3", "t4", "t5"]
@@ -679,7 +679,7 @@ async def test_fp009_no_cursor_single_request(httpx_mock: HTTPXMock):
     )
 
     async with httpx.AsyncClient() as client:
-        tools = await _get_tools("http://cur9b.example.com/mcp", client)
+        tools, _ = await _get_tools("http://cur9b.example.com/mcp", client)
 
     assert len(tools) == 2
 
@@ -698,7 +698,7 @@ async def test_fp009_cursor_max_10_pages(httpx_mock: HTTPXMock):
     )
 
     async with httpx.AsyncClient() as client:
-        tools = await _get_tools("http://cur9c.example.com/mcp", client)
+        tools, _ = await _get_tools("http://cur9c.example.com/mcp", client)
 
     # 10 pages × 1 tool = 10 tools
     assert len(tools) == 10

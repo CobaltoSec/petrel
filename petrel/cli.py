@@ -21,6 +21,8 @@ from .discovery.github import github_search
 from .discovery.npm import npm_search
 from .discovery.passive import crtsh_search, hf_spaces_search
 from .discovery.pypi import pypi_search
+from .discovery.registries import registries_search
+from .discovery.shodan import shodan_search
 from .discovery.smithery import smithery_search
 from .fingerprint.probe import probe_url, probe_urls_batch
 from .models import MCPServerRecord, RiskTier, SourceResult
@@ -81,6 +83,8 @@ async def _gather_sources(
     no_smithery: bool,
     no_pypi: bool,
     no_fofa: bool,
+    no_shodan: bool = False,
+    no_registries: bool = False,
 ) -> list[tuple[str, str]]:
     """Run all enabled discovery sources in parallel. Returns [(url, source_name), ...]."""
     import os
@@ -118,6 +122,14 @@ async def _gather_sources(
         else:
             skipped_msgs.append("  [dim]FOFA: skipped (no FOFA_EMAIL/FOFA_KEY)[/dim]")
 
+    if os.environ.get("SHODAN_API_KEY") and not no_shodan:
+        tasks.append(("shodan", shodan_search()))
+    elif not no_shodan:
+        skipped_msgs.append("  [dim]Shodan: skipped (no SHODAN_API_KEY)[/dim]")
+
+    if not no_registries:
+        tasks.append(("registries", registries_search()))
+
     # Run all in parallel
     results = await asyncio.gather(*[t[1] for t in tasks], return_exceptions=True)
 
@@ -134,6 +146,8 @@ async def _gather_sources(
         "pypi": "PyPI",
         "censys": "Censys",
         "fofa": "FOFA",
+        "shodan": "Shodan",
+        "registries": "Registries",
     }
 
     url_sources: list[tuple[str, str]] = []
@@ -240,6 +254,8 @@ def discover(
     no_smithery: Annotated[bool, typer.Option("--no-smithery", help="Skip Smithery.ai search")] = False,
     no_pypi: Annotated[bool, typer.Option("--no-pypi", help="Skip PyPI package search")] = False,
     no_fofa: Annotated[bool, typer.Option("--no-fofa", help="Skip FOFA search")] = False,
+    no_shodan: Annotated[bool, typer.Option("--no-shodan", help="Skip Shodan search")] = False,
+    no_registries: Annotated[bool, typer.Option("--no-registries", help="Skip Registries search")] = False,
     resume: Annotated[Optional[Path], typer.Option("--resume", help="JSONL with already-confirmed URLs to skip")] = None,
     since: Annotated[Optional[Path], typer.Option("--since", help="Previous results JSONL — skip already-discovered candidates")] = None,
     sarif_out: Annotated[Optional[Path], typer.Option("--sarif", help="Save SARIF 2.1.0 report")] = None,
@@ -256,6 +272,7 @@ def discover(
         url_sources = await _gather_sources(
             no_censys=no_censys, no_github=no_github, no_npm=no_npm,
             no_smithery=no_smithery, no_pypi=no_pypi, no_fofa=no_fofa,
+            no_shodan=no_shodan, no_registries=no_registries,
         )
 
         # DISC-002: normalize + dedup
@@ -539,10 +556,11 @@ def feed_corvus(
             tags.append("no-auth")
         entry["tags"] = tags
         entry["risk_tier"] = r.get("risk_tier", "INFO")
+        entry["priority_score"] = r.get("priority_score", 0)
         targets.append(entry)
 
     _TIER_VALUES = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]
-    targets.sort(key=lambda e: _TIER_VALUES.index(e.get("risk_tier", "INFO")))
+    targets.sort(key=lambda e: (_TIER_VALUES.index(e.get("risk_tier", "INFO")), -e.get("priority_score", 0)))
     doc = {"targets": targets}
     yaml_str = yaml.dump(doc, default_flow_style=False, allow_unicode=True, sort_keys=False)
 
@@ -777,6 +795,51 @@ def diff(
 
     if not new_servers and not escalated and not resolved and not disappeared and not new_tools:
         console.print("[green]No changes above --min-risk threshold.[/green]")
+
+
+# ---------------------------------------------------------------------------
+# report  (F-05)
+# ---------------------------------------------------------------------------
+
+@app.command()
+def report(
+    jsonl: Annotated[Path, typer.Argument(help="Petrel results JSONL file")],
+    sarif: Annotated[bool, typer.Option("--sarif/--no-sarif", help="Generate SARIF 2.1.0 report")] = True,
+    html: Annotated[bool, typer.Option("--html/--no-html", help="Generate HTML report")] = True,
+    output: Annotated[Optional[Path], typer.Option("--output", "-o", help="Output directory (default: same dir as JSONL)")] = None,
+) -> None:
+    """Generate SARIF and/or HTML reports from a Petrel results JSONL."""
+    if not jsonl.exists():
+        err.print(f"[red]File not found: {jsonl}[/red]")
+        raise typer.Exit(1)
+
+    records: list[MCPServerRecord] = []
+    for line in jsonl.read_text().splitlines():
+        line = line.strip()
+        if line:
+            records.append(MCPServerRecord.model_validate_json(line))
+
+    if not records:
+        console.print("[yellow]No records found.[/yellow]")
+        raise typer.Exit(0)
+
+    out_dir = output if output is not None else jsonl.parent
+    stem = jsonl.stem
+
+    if sarif:
+        from .output.sarif import write_sarif
+        sarif_path = out_dir / f"{stem}.sarif"
+        write_sarif(records, sarif_path)
+        console.print(f"[dim]SARIF saved to {sarif_path}[/dim]")
+
+    if html:
+        from .output.html import write_html
+        html_path = out_dir / f"{stem}.html"
+        write_html(records, html_path)
+        console.print(f"[dim]HTML report saved to {html_path}[/dim]")
+
+    if not sarif and not html:
+        console.print("[yellow]Nothing to generate (both --no-sarif and --no-html).[/yellow]")
 
 
 # ---------------------------------------------------------------------------

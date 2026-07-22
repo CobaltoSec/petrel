@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import os
+import re
 
 import httpx
 
@@ -17,6 +19,10 @@ GITHUB_QUERIES = [
     '"model-context-protocol" in:readme',
     '"mcp_server" in:name',
 ]
+
+_README_DEPLOY_RE = re.compile(
+    r'https?://[\w.-]+\.(?:railway\.app|fly\.dev|fly\.io|vercel\.app|hf\.space|onrender\.com)(?:/[\w./-]*)?'
+)
 
 _SKIP_HOSTS = frozenset([
     "github.com",
@@ -86,6 +92,27 @@ async def github_search(
                         homepage = (repo.get("homepage") or "").strip()
                         if _is_deployment_url(homepage):
                             urls.append(homepage)
+                        else:
+                            # Fallback: parse README for deployment URLs
+                            full_name = repo.get("full_name", "")
+                            if full_name:
+                                try:
+                                    readme_resp = await client.get(
+                                        f"{_API_BASE}/repos/{full_name}/readme",
+                                        headers={"Accept": "application/vnd.github.v3+json"},
+                                    )
+                                    if readme_resp.status_code == 200:
+                                        data = readme_resp.json()
+                                        content_b64 = data.get("content", "")
+                                        readme_text = base64.b64decode(content_b64).decode("utf-8", errors="ignore")
+                                        seen_readme: set[str] = set()
+                                        for u in _README_DEPLOY_RE.findall(readme_text):
+                                            if u not in seen_readme and _is_deployment_url(u):
+                                                seen_readme.add(u)
+                                                urls.append(u)
+                                                break  # max 1 URL per repo
+                                except Exception:
+                                    pass  # continue without URL on any failure
                     if len(items) < 100:  # partial page = last page
                         break
                     if page < 10:

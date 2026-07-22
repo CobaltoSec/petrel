@@ -112,6 +112,7 @@ class MCPServerRecord(BaseModel):
     tools: list[MCPTool] = []
     auth_state: AuthState = AuthState.UNKNOWN
     risk_tier: RiskTier = RiskTier.INFO
+    priority_score: int = 0
     risk_reasons: list[str] = []
     behind_cloudflare: bool = False
     scanned_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

@@ -1,6 +1,6 @@
 # Petrel — Siguiente
 
-## Estado: v0.6.0 (2026-07-21) — 212/212 tests ✅
+## Estado: v0.7.0 (2026-07-22) — 212/212 tests ✅
 
 Repo: `github.com/CobaltoSec/petrel` · PyPI: `cobaltosec-petrel v0.6.0` ✅
 
@@ -129,7 +129,7 @@ Potencial: ~6,756 servers nuevos (2x el pool actual).
 | **CS16** | Corvus batch scan `targets-v05.yaml` | ✅ CERRADO 2026-07-20 |
 | **PETREL-V07** | Phase 2 — 14 fixes + PyPI v0.6.0 | ✅ CERRADO 2026-07-21 |
 | **PETREL-RUN3** | Smithery API fix + Run 3: 464 confirmados, targets-v07.yaml → CS17 | ✅ CERRADO 2026-07-21 |
-| **PETREL-V08** | Phase 3 — Shodan + MCP registries + `petrel watch` | pendiente |
+| **PETREL-V08** | Phase 3 — 10 fixes + v0.7.0 | ✅ CERRADO 2026-07-22 |
 
 ---
 

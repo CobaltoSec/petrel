@@ -122,7 +122,9 @@ def test_discover_no_probe_writes_urls_to_file(tmp_path: Path):
          patch("petrel.cli.npm_search", new_callable=AsyncMock, return_value=_empty), \
          patch("petrel.cli.smithery_search", new_callable=AsyncMock, return_value=_empty), \
          patch("petrel.cli.pypi_search", new_callable=AsyncMock, return_value=_empty), \
-         patch("petrel.cli.fofa_search", new_callable=AsyncMock, return_value=_empty):
+         patch("petrel.cli.fofa_search", new_callable=AsyncMock, return_value=_empty), \
+         patch("petrel.cli.shodan_search", new_callable=AsyncMock, return_value=_empty), \
+         patch("petrel.cli.registries_search", new_callable=AsyncMock, return_value=_empty):
         result = runner.invoke(app, [
             "discover",
             "--no-probe",
@@ -133,6 +135,8 @@ def test_discover_no_probe_writes_urls_to_file(tmp_path: Path):
             "--no-smithery",
             "--no-pypi",
             "--no-fofa",
+            "--no-shodan",
+            "--no-registries",
         ])
 
     assert result.exit_code == 0, result.output
@@ -385,10 +389,13 @@ def test_disc002_url_normalization_dedup(tmp_path: Path):
     with patch("petrel.cli.crtsh_search", new_callable=AsyncMock,
                return_value=SourceResult(urls=["foo.example.com"])), \
          patch("petrel.cli.hf_spaces_search", new_callable=AsyncMock,
-               return_value=SourceResult(urls=["https://foo.example.com/"])):
+               return_value=SourceResult(urls=["https://foo.example.com/"])), \
+         patch("petrel.cli.shodan_search", new_callable=AsyncMock, return_value=SourceResult(urls=[])), \
+         patch("petrel.cli.registries_search", new_callable=AsyncMock, return_value=SourceResult(urls=[])):
         result = runner.invoke(app, [
             "discover", "--no-probe",
             "--no-censys", "--no-github", "--no-npm", "--no-smithery", "--no-pypi", "--no-fofa",
+            "--no-shodan", "--no-registries",
         ])
 
     assert result.exit_code == 0, result.output
@@ -408,10 +415,13 @@ def test_disc011_source_error_printed(tmp_path: Path):
     with patch("petrel.cli.crtsh_search", new_callable=AsyncMock,
                return_value=SourceResult(urls=[], error="connection refused")), \
          patch("petrel.cli.hf_spaces_search", new_callable=AsyncMock,
-               return_value=SourceResult(urls=[])):
+               return_value=SourceResult(urls=[])), \
+         patch("petrel.cli.shodan_search", new_callable=AsyncMock, return_value=SourceResult(urls=[])), \
+         patch("petrel.cli.registries_search", new_callable=AsyncMock, return_value=SourceResult(urls=[])):
         result = runner.invoke(app, [
             "discover", "--no-probe",
             "--no-censys", "--no-github", "--no-npm", "--no-smithery", "--no-pypi", "--no-fofa",
+            "--no-shodan", "--no-registries",
         ])
 
     assert result.exit_code == 0, result.output
@@ -448,10 +458,13 @@ def test_perf01_incremental_output(tmp_path: Path):
                return_value=SourceResult(urls=["server0.example.com"])), \
          patch("petrel.cli.hf_spaces_search", new_callable=AsyncMock,
                return_value=SourceResult(urls=[])), \
+         patch("petrel.cli.shodan_search", new_callable=AsyncMock, return_value=SourceResult(urls=[])), \
+         patch("petrel.cli.registries_search", new_callable=AsyncMock, return_value=SourceResult(urls=[])), \
          patch("petrel.cli.probe_urls_batch", side_effect=_fake_batch):
         result = runner.invoke(app, [
             "discover", "--output", str(out_file),
             "--no-censys", "--no-github", "--no-npm", "--no-smithery", "--no-pypi", "--no-fofa",
+            "--no-shodan", "--no-registries",
         ])
 
     assert result.exit_code == 0, result.output
@@ -475,15 +488,17 @@ def test_perf02_all_sources_invoked(tmp_path: Path):
     npm_mock = AsyncMock(return_value=empty)
     sm_mock = AsyncMock(return_value=empty)
     pypi_mock = AsyncMock(return_value=empty)
+    reg_mock = AsyncMock(return_value=empty)
 
     with patch("petrel.cli.crtsh_search", crt_mock), \
          patch("petrel.cli.hf_spaces_search", hf_mock), \
          patch("petrel.cli.github_search", gh_mock), \
          patch("petrel.cli.npm_search", npm_mock), \
          patch("petrel.cli.smithery_search", sm_mock), \
-         patch("petrel.cli.pypi_search", pypi_mock):
+         patch("petrel.cli.pypi_search", pypi_mock), \
+         patch("petrel.cli.registries_search", reg_mock):
         runner.invoke(app, [
-            "discover", "--no-probe", "--no-censys", "--no-fofa",
+            "discover", "--no-probe", "--no-censys", "--no-fofa", "--no-shodan",
         ])
 
     assert crt_mock.called, "crtsh_search was not called"
@@ -492,6 +507,7 @@ def test_perf02_all_sources_invoked(tmp_path: Path):
     assert npm_mock.called, "npm_search was not called"
     assert sm_mock.called, "smithery_search was not called"
     assert pypi_mock.called, "pypi_search was not called"
+    assert reg_mock.called, "registries_search was not called"
 
 
 # ---------------------------------------------------------------------------

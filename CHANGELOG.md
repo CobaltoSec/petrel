@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+## [PETREL-V08] — 2026-07-22
+
+### Added
+- Discovery: GitHub README parsing — cuando un repo no tiene `homepage`, hace GET a GitHub Contents API para extraer URLs de deployment del README (railway.app, fly.dev, vercel.app, hf.space, onrender.com). Máx 1 URL por repo (DISC-006)
+- Discovery: Shodan source — query `http.html:"2024-11-05"`; requiere `SHODAN_API_KEY`. Hasta 1,000 hosts/run. Highest-signal internet scanner para MCP (DISC-007)
+- Discovery: MCP registries — glama.ai (`/api/mcp/v1/servers`) + pulsemcp.com (`/v0beta/servers`), paginados, sin API key. Listas curadas de MCP servers (DISC-013)
+- CLI: `discover` — flags `--no-shodan` / `--no-registries`. Shodan solo activo con `SHODAN_API_KEY` presente (DISC-007/013)
+- CLI: `petrel report <file.jsonl>` — regenera HTML/SARIF desde JSONL existente sin re-probe (F-05)
+- Fingerprint: data-plane auth check — si `tools/list` responde 401/403 pero `initialize` OK, escala `auth_state` a REQUIRED (FP-005)
+- Fingerprint: retry en 503 (cold start Railway/Fly free tier) — 1 reintento con sleep 3s en `_probe_streamable`. Solo 503 (PERF-05)
+- Scoring: nested inputSchema recursivo (depth ≤ 3) — detecta params peligrosos anidados en `type: object` (FP-010)
+- Scoring: `server_instructions` scoring — CRITICAL para injection patterns, HIGH para credential patterns. `_score_server_instructions()` (SR-07)
+- Scoring: `priority_score: int` 0-100 en `MCPServerRecord`. Base: CRITICAL=80, HIGH=60, MEDIUM=40, LOW=20. Bonuses: no-auth +15, exec tools +5, public platform +3. `feed-corvus` ordena por `(tier, -priority_score)` (SR-08)
+
+## [0.7.0] — 2026-07-22
+
+_(PyPI publish pendiente — token requerido)_
+
 ## [PETREL-RUN3] — 2026-07-21
 
 ### Fixed

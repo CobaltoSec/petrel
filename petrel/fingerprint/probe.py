@@ -137,14 +137,23 @@ async def probe_urls_batch(
 async def _probe_streamable(url: str, client: httpx.AsyncClient) -> MCPServerRecord | None:
     for path in _STREAMABLE_PATHS:
         endpoint = f"{url}{path}"
-        try:
-            resp = await client.post(
-                endpoint,
-                json=_INITIALIZE,
-                headers={"Accept": "application/json, text/event-stream"},
-                timeout=httpx.Timeout(connect=3.0, read=8.0, write=5.0, pool=5.0),
-            )
-        except httpx.RequestError:
+        resp = None
+        for _attempt in range(2):  # PERF-05: max 2 attempts — original + 1 retry on 503 cold start
+            try:
+                _resp = await client.post(
+                    endpoint,
+                    json=_INITIALIZE,
+                    headers={"Accept": "application/json, text/event-stream"},
+                    timeout=httpx.Timeout(connect=3.0, read=8.0, write=5.0, pool=5.0),
+                )
+            except httpx.RequestError:
+                break  # resp stays None → skip path
+            if _resp.status_code == 503 and _attempt == 0:
+                await asyncio.sleep(3)
+                continue  # retry once for cold-start 503
+            resp = _resp
+            break
+        if resp is None or resp.status_code == 503:
             continue
 
         behind_cf = "cf-ray" in resp.headers
@@ -205,11 +214,18 @@ async def _probe_streamable(url: str, client: httpx.AsyncClient) -> MCPServerRec
             final_url=final_url,
             redirect_count=len(resp.history),
         )
-        record.tools, record.resources, record.prompts = await asyncio.gather(
+        tools_result, resources, prompts = await asyncio.gather(
             _get_tools(endpoint, client),
             _get_resources(endpoint, client),
             _get_prompts(endpoint, client),
         )
+        tools, data_plane_auth = tools_result
+        record.tools = tools
+        record.resources = resources
+        record.prompts = prompts
+        # FP-005: tools/list returned 401/403 — data plane is protected even if initialize was open
+        if data_plane_auth and record.auth_state == AuthState.NONE:
+            record.auth_state = AuthState.REQUIRED
         return record
 
     return None
@@ -259,11 +275,18 @@ async def _probe_sse(url: str, client: httpx.AsyncClient) -> MCPServerRecord | N
                             record.server_name = info.get("name")
                             record.server_version = info.get("version")
                             record.protocol_version = result.get("protocolVersion")
-                        record.tools, record.resources, record.prompts = await asyncio.gather(
+                        tools_result, resources, prompts = await asyncio.gather(
                             _get_tools(msg_endpoint, client),
                             _get_resources(msg_endpoint, client),
                             _get_prompts(msg_endpoint, client),
                         )
+                        tools, data_plane_auth = tools_result
+                        record.tools = tools
+                        record.resources = resources
+                        record.prompts = prompts
+                        # FP-005: tools/list returned 401/403 — data plane is protected
+                        if data_plane_auth and record.auth_state == AuthState.NONE:
+                            record.auth_state = AuthState.REQUIRED
                 except Exception:
                     pass
 
@@ -275,13 +298,20 @@ async def _probe_sse(url: str, client: httpx.AsyncClient) -> MCPServerRecord | N
     return None
 
 
-async def _get_tools(endpoint: str, client: httpx.AsyncClient) -> list[MCPTool]:
+async def _get_tools(endpoint: str, client: httpx.AsyncClient) -> tuple[list[MCPTool], bool]:
+    """Returns (tools, data_plane_auth_required).
+
+    data_plane_auth_required is True when tools/list responds 401/403 —
+    meaning the server protects its data plane even if initialize was open.
+    """
     tools: list[MCPTool] = []
     cursor: str | None = None
     for _ in range(10):  # max 10 pages (1000+ tools is unrealistic)
         req = _TOOLS_LIST_CURSOR(cursor) if cursor else _TOOLS_LIST
         try:
             resp = await client.post(endpoint, json=req, timeout=httpx.Timeout(connect=3.0, read=8.0, write=5.0, pool=5.0))
+            if resp.status_code in (401, 403):
+                return ([], True)
             if resp.status_code != 200:
                 break
             data = resp.json()
@@ -299,7 +329,7 @@ async def _get_tools(endpoint: str, client: httpx.AsyncClient) -> list[MCPTool]:
                 break
         except Exception:
             break
-    return tools
+    return (tools, False)
 
 
 async def _get_resources(endpoint: str, client: httpx.AsyncClient) -> list[MCPResource]:
