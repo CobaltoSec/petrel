@@ -130,25 +130,39 @@ Potencial: ~6,756 servers nuevos (2x el pool actual).
 | **PETREL-V07** | Phase 2 — 14 fixes + PyPI v0.6.0 | ✅ CERRADO 2026-07-21 |
 | **PETREL-RUN3** | Smithery API fix + Run 3: 464 confirmados, targets-v07.yaml → CS17 | ✅ CERRADO 2026-07-21 |
 | **PETREL-V08** | Phase 3 — 10 fixes + v0.7.0 | ✅ CERRADO 2026-07-22 |
+| **PETREL-CFP-LATAM** | CFP Ekoparty 2026 — abstract + slides + submit Sessionize | ✅ CERRADO 2026-07-22 |
 
 ---
 
-## Ekoparty 2026 — CFP Petrel (deadline: 7 agosto para tener margen)
+## PETREL-CFP-LATAM — ✅ CERRADO (2026-07-22)
 
-**Estado:** borrador listo en `docs/cfp-ekoparty-2026.md`. Slot 3 disponible en Sessionize (slot 1 = Corvus ✅, slot 2 = Condor ✅).
+**Ángulo:** "El scanner que ve lo que Shodan no puede" — números globales Run 3.
 
-**Ángulo del talk:** "El scanner que ve lo que Shodan no puede" — dato LATAM-específico fortalece el ángulo regional para Ekoparty Buenos Aires.
+- D1: Geolocate LATAM (DNS+ip-api.com/batch) → 0 servers LATAM genuinos (CDN FPs). Script: `scripts/latam_stats.py`
+- D2: CFP actualizado con Run 3 (3,948/464/41 CRITICAL/23%) → `docs/cfp-ekoparty-2026.md`
+- D3: Submitted a Sessionize ✅ — 3/3 slots (Corvus + Condor + Petrel)
+- D4 (extra): Slide deck 15 slides + PDF → `Downloads/petrel-ekoparty-2026.html` + `petrel-slides-2026.pdf`
 
-**Bloqueante para submit:** Run 3 con filtro LATAM — sin datos regionales el abstract pierde el ángulo geográfico.
+**Notificaciones Ekoparty:** 2026-09-04/11. Conferencia Oct 7-9 Buenos Aires.
 
-### Run 3 — LATAM scan (desbloquea CFP submit)
+---
 
-**Run 3 completada (2026-07-21):** 464 confirmados, 41 CRITICAL, Smithery aportó 45 servers reales (38% conversión). `targets-v07.yaml` listo para CS17.
+## PETREL-V09 — Phase 4 backlog (próximo bloque)
 
-**Pendiente para CFP:** filtro geolocation LATAM (AR/BR/MX/CO/CL) vía IP sobre `results-v07.jsonl` → estadísticas regionales → actualizar `docs/cfp-ekoparty-2026.md` → submit Sessionize.
+**Objetivo:** 13 mejoras de calidad/performance del backlog → v0.8.0.
 
-| Paso | Acción |
-|------|--------|
-| 1 | `petrel stats results-v07.jsonl` + geolocate IPs con MaxMind/ipapi → filtrar LATAM |
-| 2 | Agregar dato LATAM al CFP abstract (`docs/cfp-ekoparty-2026.md`) |
-| 3 | Submit a Sessionize antes del 7 agosto |
+| ID | Fix | Tamaño | Impacto |
+|----|-----|--------|---------|
+| PERF-06 | pypi.py: un solo httpx.AsyncClient compartido (en lugar de uno por package) | S | MEDIUM |
+| DISC-010 | PyPI: chunked gather de 50 (en lugar de gather sobre toda la lista) | S | MEDIUM |
+| SR-09 | Cluster detection: incluir tools con tier CRITICAL como implicit exec-family | S | HIGH |
+| SR-10 | Anonymous server signal (no name, no tools, no auth → explicit flag) | XS | MEDIUM |
+| FP-004 | Basic auth detection + custom header hints (X-Api-Key-Required) | XS | MEDIUM |
+| FP-006 | Per-domain throttling (shared hosts: railway.app, hf.space → Semaphore(3)) | M | MEDIUM |
+| FP-011 | response_time_ms tracking en MCPServerRecord | XS | LOW |
+| FP-012 | Probe failure classification: down vs non-MCP vs timeout | S | MEDIUM |
+| DISC-012 | Censys/FOFA: usar hostname en lugar de raw IP:port para virtual hosting | S | MEDIUM |
+| F-06 | stats: schema completeness %, tool count distribution, Cloudflare % | XS | LOW |
+| F-07 | Error reporting: probe failure count en summary | XS | LOW |
+| F-08 | Markdown + CSV output formats | S | LOW |
+| PERF-08 | GitHub discovery: 4 queries en paralelo (con GITHUB_TOKEN) | S | MEDIUM |

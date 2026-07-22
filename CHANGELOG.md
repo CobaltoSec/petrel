@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+## [PETREL-CFP-LATAM] — 2026-07-22
+
+### Research
+- Geolocate LATAM: DNS resolve + ip-api.com/batch sobre `results-v07.jsonl` — sin servers LATAM genuinos (CDN false positives: Cloudflare Toronto → CA para 135/276 hosts). Script en `scripts/latam_stats.py`
+- CFP: pivote de ángulo LATAM a números globales Run 3 (más sólidos y verificables)
+
+### CFP Ekoparty 2026 (deadline 14 agosto)
+- Abstract actualizado con Run 3: 3,948 candidatos → 464 confirmados, 41 CRITICAL, 23% sin auth, 50+ GHSAs — `docs/cfp-ekoparty-2026.md`
+- Slide deck 15 slides generado (dark oceanic / teal accent) → `Downloads/petrel-ekoparty-2026.html`
+- PDF 15 páginas vía Playwright screenshot-por-slide → `Downloads/petrel-slides-2026.pdf`
+- Submitted a Sessionize — 3/3 slots usados (Corvus + Condor + Petrel)
+
 ## [PETREL-V08] — 2026-07-22
 
 ### Added

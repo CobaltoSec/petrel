@@ -11,10 +11,10 @@
 
 ## Estado de la submission
 
-- [ ] Segunda run `petrel discover` para datos actualizados (actualmente 850 candidatos)
-- [ ] Scan LATAM-específico (ASes argentinos/brasileños) para ángulo regional en Ekoparty
-- [ ] Actualizar stats con números finales antes del 7 agosto
+- [x] Run 3 completada — 464 confirmados, 3,948 candidatos, 41 CRITICAL, 106 sin auth (23%)
+- [x] Stats actualizadas con números finales de Run 3
 - [ ] Grabar fallback video del demo (siempre llevar por si falla red en escenario)
+- [ ] Submit a Sessionize
 
 ---
 
@@ -22,7 +22,7 @@
 
 Censys encontró 21.000 servidores MCP en internet. Saben el IP y el ASN. No saben que 687 de esos servidores ejecutan cualquier bash command que les mandás — sin login, sin API key, sin ninguna autenticación. Nosotros construimos el scanner que extrae qué hace cada servidor hablando el protocolo, no leyendo el puerto.
 
-**Frase para slides:** *"Censys cuenta puertas. Nosotros golpeamos 850 y preguntamos qué hay adentro."*
+**Frase para slides:** *"Censys cuenta puertas. Nosotros golpeamos 3.948 y preguntamos qué hay adentro."*
 
 ---
 
@@ -30,9 +30,9 @@ Censys encontró 21.000 servidores MCP en internet. Saben el IP y el ASN. No sab
 
 MCP (Model Context Protocol) cruzó los 21.000 servidores expuestos en internet en 18 meses, creciendo de cero a infraestructura crítica de AI más rápido que cualquier protocolo anterior. Los scanners de internet existentes —Censys, Shodan, ZMap— pueden localizar estos servidores pero no pueden caracterizar qué hacen. Un port scanner ve un socket; no puede decirte que el servidor detrás ofrece `execute_bash` a clientes no autenticados.
 
-Construimos **Petrel**, un fingerprinter semántico open-source que habla el protocolo MCP JSON-RPC para extraer el inventario completo de tools de cada servidor descubierto, detectar el estado de autenticación, y asignar risk scores por tool. A partir de 562 candidatos por descubrimiento pasivo (certificate transparency logs, HuggingFace Spaces, GitHub, npm), Petrel confirmó 72 servidores live en su primera run. Combinado con datos de Censys, caracterizamos 687 servidores que ofrecen capacidades de shell execution sin ninguna autenticación, y encontramos que el 91,5% de los servidores Streamable HTTP no tienen OAuth.
+Construimos **Petrel**, un fingerprinter semántico open-source que habla el protocolo MCP JSON-RPC para extraer el inventario completo de tools de cada servidor descubierto, detectar el estado de autenticación, y asignar risk scores por tool. A partir de 3.948 candidatos por descubrimiento pasivo (certificate transparency logs, HuggingFace Spaces, GitHub, npm, Smithery, Shodan, Censys), Petrel confirmó 464 servidores MCP activos en tres runs. De esos, 41 califican CRITICAL y 106 (23%) no implementan ningún mecanismo de autenticación. Combinado con datos de Censys, caracterizamos 687 servidores que ofrecen capacidades de shell execution sin ninguna autenticación, y encontramos que el 91,5% de los servidores Streamable HTTP no tienen OAuth.
 
-Esta charla presenta el pipeline de descubrimiento de Petrel, la metodología de fingerprinting semántico, y la arquitectura de risk scoring por tool. Comparamos nuestros hallazgos contra el trabajo existente de Censys, Knostic y Trend Micro para demostrar qué revela la brecha semántica que el port scanning no puede ver. Cerramos con el pipeline Petrel → Corvus y un scan regional de exposición MCP en LATAM.
+Esta charla presenta el pipeline de descubrimiento de Petrel, la metodología de fingerprinting semántico, y la arquitectura de risk scoring por tool. Comparamos nuestros hallazgos contra el trabajo existente de Censys, Knostic y Trend Micro para demostrar qué revela la brecha semántica que el port scanning no puede ver. Cerramos con el pipeline Petrel → Corvus y casos reales de disclosure responsable: 50+ GHSAs filed sobre servidores MCP encontrados por Petrel.
 
 **Demo en vivo (4 actos):**
 1. `petrel discover` — candidatos aparecen en tiempo real desde crt.sh, HuggingFace, GitHub, npm
@@ -46,9 +46,9 @@ Esta charla presenta el pipeline de descubrimiento de Petrel, la metodología de
 
 MCP (Model Context Protocol) crossed 21,000 internet-exposed deployments in eighteen months, growing from zero to critical AI infrastructure faster than any protocol before it. Existing internet scanners — Censys, Shodan, ZMap — can locate these servers but cannot characterize what they do. A port scanner sees a socket; it cannot tell you that the server behind it offers `execute_bash` to unauthenticated clients.
 
-We built **Petrel**, an open-source semantic fingerprinter that speaks the MCP JSON-RPC protocol to extract the complete tool inventory from each discovered server, detect authentication state, and assign per-tool risk scores. From 562 passive discovery candidates (certificate transparency logs, HuggingFace Spaces, GitHub, npm), Petrel confirmed 72 live servers on its first run. Combined with Censys data, we characterize 687 servers advertising shell execution capabilities with zero authentication, and find 91.5% of Streamable HTTP MCP servers lack OAuth entirely.
+We built **Petrel**, an open-source semantic fingerprinter that speaks the MCP JSON-RPC protocol to extract the complete tool inventory from each discovered server, detect authentication state, and assign per-tool risk scores. From 3,948 passive discovery candidates (certificate transparency logs, HuggingFace Spaces, GitHub, npm, Smithery, Shodan, Censys), Petrel confirmed 464 live MCP servers across three runs. Of those, 41 score CRITICAL and 106 (23%) implement no authentication mechanism whatsoever. Combined with Censys data, we characterize 687 servers advertising shell execution capabilities with zero authentication, and find 91.5% of Streamable HTTP MCP servers lack OAuth entirely.
 
-This talk presents Petrel's discovery pipeline, semantic fingerprinting methodology, and per-tool risk scoring architecture. We compare our findings against existing census work (Censys, Knostic, Trend Micro) to demonstrate what the semantic gap reveals that port scanning misses. We conclude with the Petrel → Corvus disclosure pipeline and a regional scan of LATAM-hosted MCP exposure.
+This talk presents Petrel's discovery pipeline, semantic fingerprinting methodology, and per-tool risk scoring architecture. We compare our findings against existing census work (Censys, Knostic, Trend Micro) to demonstrate what the semantic gap reveals that port scanning misses. We conclude with the Petrel → Corvus disclosure pipeline and real cases from 50+ GHSAs filed against MCP servers discovered by Petrel.
 
 **Live demo — 4 acts:**
 1. `petrel discover` — candidates appear in real time from crt.sh, HuggingFace, GitHub, npm
@@ -71,7 +71,7 @@ This talk presents Petrel's discovery pipeline, semantic fingerprinting methodol
 
 ## Por qué Ekoparty es el venue ideal
 
-Petrel es el complemento del talk de Corvus ya submiteado: Corvus auditó 300 servidores conocidos. Petrel encontró 21.000 desconocidos. Son el mismo ecosistema desde lados opuestos — discovery vs audit. Dos charlas que se refuerzan mutuamente. El scan LATAM-específico agrega ángulo regional exclusivo para esta audiencia.
+Petrel es el complemento del talk de Corvus ya submiteado: Corvus auditó servidores conocidos. Petrel encontró 464 desconocidos entre 3.948 candidatos. Son el mismo ecosistema desde lados opuestos — discovery vs audit. Dos charlas que se refuerzan mutuamente. El ángulo regional no es geográfico, es de autoría: Petrel y Corvus son herramientas construidas en Argentina presentando research ofensivo de AI security con datos reales de internet.
 
 ---
 
