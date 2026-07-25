@@ -319,6 +319,7 @@ async def _probe_sse(url: str, client: httpx.AsyncClient) -> MCPServerRecord | N
                             record.server_name = info.get("name")
                             record.server_version = info.get("version")
                             record.protocol_version = result.get("protocolVersion")
+                            record.server_instructions = result.get("instructions")
                         tools_result, resources, prompts = await asyncio.gather(
                             _get_tools(msg_endpoint, client),
                             _get_resources(msg_endpoint, client),

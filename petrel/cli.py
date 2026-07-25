@@ -613,6 +613,89 @@ def feed_corvus(
 
 
 # ---------------------------------------------------------------------------
+# runs / runs-diff
+# ---------------------------------------------------------------------------
+
+@app.command(name="runs")
+def runs_list() -> None:
+    """List saved scan runs."""
+    from petrel.storage import list_runs
+
+    rows = list_runs()
+    if not rows:
+        typer.echo("No runs saved.")
+        return
+    for r in rows:
+        tag = f" [{r['tag']}]" if r["tag"] else ""
+        typer.echo(f"{r['id']}{tag}  {r['ts'][:19]}  {r['count']} servers")
+
+
+@app.command(name="runs-diff")
+def runs_diff(tag1: str, tag2: str) -> None:
+    """Diff two scan runs by tag or ID."""
+    from petrel.storage import diff_runs
+
+    only1, only2 = diff_runs(tag1, tag2)
+    if only1:
+        typer.echo(f"Only in {tag1} ({len(only1)}):")
+        for u in sorted(only1):
+            typer.echo(f"  - {u}")
+    if only2:
+        typer.echo(f"Only in {tag2} ({len(only2)}):")
+        for u in sorted(only2):
+            typer.echo(f"  + {u}")
+    if not only1 and not only2:
+        typer.echo("No differences.")
+
+
+# ---------------------------------------------------------------------------
+# feed-condor
+# ---------------------------------------------------------------------------
+
+@app.command(name="feed-condor")
+def feed_condor(
+    results: Annotated[Path, typer.Argument(help="Petrel results.jsonl file")],
+    output: Annotated[Optional[Path], typer.Option("--output", "-o", help="Output file (default: stdout)")] = None,
+    min_score: Annotated[int, typer.Option(help="Minimum priority_score")] = 50,
+) -> None:
+    """Filter Petrel results for agentic platforms and generate Condor targets."""
+    import json as _json
+
+    _AGENTIC_KEYWORDS = ["flowise", "langflow", "dify", "n8n", "autogen", "langchain", "llamaflow"]
+
+    if not results.exists():
+        err.print(f"[red]File not found: {results}[/red]")
+        raise typer.Exit(1)
+
+    lines: list[str] = []
+    for line in results.read_text().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = _json.loads(line)
+        except Exception:
+            continue
+        score = rec.get("priority_score", 0)
+        if score < min_score:
+            continue
+        name = (rec.get("server_name") or rec.get("url", "")).lower()
+        matched = next((k for k in _AGENTIC_KEYWORDS if k in name), None)
+        if not matched:
+            continue
+        platform = matched if matched in ("flowise", "langflow", "dify", "autogen") else "generic"
+        url = rec.get("url", "")
+        lines.append(f"{url} {platform}")
+
+    content = "\n".join(lines) + "\n" if lines else ""
+    if output:
+        output.write_text(content)
+        typer.echo(f"Wrote {len(lines)} targets to {output}")
+    else:
+        typer.echo(content, nl=False)
+
+
+# ---------------------------------------------------------------------------
 # stats  (C3)
 # ---------------------------------------------------------------------------
 
