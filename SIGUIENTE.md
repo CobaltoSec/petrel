@@ -169,11 +169,29 @@ Potencial: ~6,756 servers nuevos (2x el pool actual).
 
 ---
 
-## PETREL-RUN4 — próximo bloque
+## PETREL-RUN4 — ✅ CERRADO (2026-07-24)
 
-**Objetivo:** Run 4 con v0.8.0 — nueva scan aprovechando mejoras de discovery y scoring.
+**Run 4 con v0.8.0. 4,110 candidatos → 296 confirmados → 39 targets → CS18.**
 
-- D1: `petrel discover` con v0.8.0 — verificar Censys hostnames + FOFA hostnames + GitHub parallel
-- D2: Comparar con results-v07.jsonl via `petrel diff` — nuevos servers, desaparecidos
-- D3: `petrel feed-corvus results-v08.jsonl` → targets-v08.yaml → CS17
-- D4 (opcional): Publicar cobaltosec-petrel v0.8.0 en PyPI (requiere token manual)
+- D1: `petrel discover` v0.8.0 ✅ — 296 confirmados / 35 CRITICAL / 4 HIGH / 4,110 candidatos
+- D2: `petrel diff` results-v07 vs results-v08 ✅ — 3 nuevos, 1 escalado, 193 desaparecidos
+- D3: `petrel feed-corvus` → `targets-v08.yaml` ✅ — 39 targets (35 CRITICAL + 4 HIGH) → CS18
+- D4: PyPI cobaltosec-petrel v0.8.0 ⏸ deferred — requiere token manual scoped a cobaltosec-petrel
+
+**Bug fix incluido:** `pyproject.toml` 0.7.0 → 0.8.0 (omitido en PETREL-V09)
+
+---
+
+## CS18 — próximo (Corvus)
+
+Corvus batch scan `targets-v08.yaml` (39 targets CRITICAL+HIGH). Bloque en proyecto Corvus.
+
+---
+
+## PETREL-PyPI — pendiente manual
+
+Publicar `cobaltosec-petrel v0.8.0` en PyPI. Requiere token nuevo scoped a `cobaltosec-petrel`.
+
+```bash
+python -m build && twine upload dist/cobaltosec_petrel-0.8.0*
+```

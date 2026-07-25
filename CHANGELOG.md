@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## [PETREL-RUN4] — 2026-07-24
+
+### Run 4
+- `petrel discover` v0.8.0: 4,110 candidatos → 296 MCP servers confirmados (35 CRITICAL · 4 HIGH · 44 LOW · 213 INFO)
+- `petrel diff` vs Run 3: 3 nuevos (2 CRITICAL: aistoragedepot.com, ucpchecker.com · 1 HIGH: viatsy.com), 1 escalado (spacemolt.com LOW→CRITICAL), 193 desaparecidos (incl. 9 CRITICAL de Run 3: heym.run, finvestai.top, omi.me, kernlang.dev...), 3 servers con tools nuevas
+- `petrel feed-corvus` → `targets-v08.yaml`: 39 targets (35 CRITICAL + 4 HIGH) → Corvus CS18
+- Bug fix: `pyproject.toml` version `0.7.0` → `0.8.0` (omitido en cierre PETREL-V09)
+
 ## [PETREL-V09] — 2026-07-22
 
 ### Added
