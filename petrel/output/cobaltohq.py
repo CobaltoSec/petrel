@@ -10,7 +10,7 @@ def emit_critical_servers(records: list[MCPServerRecord]) -> int:
     Returns the number of events emitted.
     """
     try:
-        from cobaltohq.client import emit  # type: ignore[import]
+        from cobalt_hub_client import emit  # type: ignore[import]
     except ImportError:
         return 0
 
@@ -29,6 +29,7 @@ def emit_critical_servers(records: list[MCPServerRecord]) -> int:
                     "risk_reasons": rec.risk_reasons,
                     "discovered_via": rec.discovered_via,
                 },
+                "petrel",
             )
             emitted += 1
         except Exception:
