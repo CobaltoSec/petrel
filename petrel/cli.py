@@ -401,10 +401,11 @@ def discover(
         console.print(f"[dim]CSV saved to {csv_out}[/dim]")
 
     # Always emit critical events to CobaltoHQ
-    from .output.cobaltohq import emit_critical_servers
+    from .output.cobaltohq import emit_critical_servers, emit_scan_completed
     n_emitted = emit_critical_servers(records)
     if n_emitted:
         console.print(f"[dim]CobaltoHQ: {n_emitted} high-risk events emitted[/dim]")
+    emit_scan_completed(records, command="discover", output_file=str(output) if output else None)
 
 
 # ---------------------------------------------------------------------------
@@ -515,10 +516,11 @@ def scan(
         console.print(f"[dim]CSV saved to {csv_out}[/dim]")
 
     # Always emit critical events to CobaltoHQ
-    from .output.cobaltohq import emit_critical_servers
+    from .output.cobaltohq import emit_critical_servers, emit_scan_completed
     n_emitted = emit_critical_servers(filtered)
     if n_emitted:
         console.print(f"[dim]CobaltoHQ: {n_emitted} high-risk events emitted[/dim]")
+    emit_scan_completed(filtered, command="scan", targets_count=len(urls), output_file=str(output) if output else None)
 
 
 # ---------------------------------------------------------------------------
@@ -950,6 +952,24 @@ def diff(
 
     if not new_servers and not escalated and not resolved and not disappeared and not new_tools:
         console.print("[green]No changes above --min-risk threshold.[/green]")
+
+    try:
+        from .output.cobaltohq import emit_scan_completed as _emit  # type: ignore[import]
+        from cobalt_hub_client import emit as _hub_emit  # type: ignore[import]
+        new_critical = sum(1 for r in new_servers.values() if r.get("risk_tier") == "CRITICAL")
+        new_high = sum(1 for r in new_servers.values() if r.get("risk_tier") == "HIGH")
+        _hub_emit("petrel.diff.completed", {
+            "old_file": old.name,
+            "new_file": new.name,
+            "new_servers": len(new_servers),
+            "new_critical": new_critical,
+            "new_high": new_high,
+            "escalated": len(escalated),
+            "resolved": len(resolved),
+            "disappeared": len(disappeared),
+        }, "petrel")
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------
