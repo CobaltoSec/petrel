@@ -226,6 +226,12 @@ def probe(
 
     result = score_server(result)
 
+    try:
+        from petrel.output.cobaltohq import emit_critical_servers
+        emit_critical_servers([result])
+    except Exception:
+        pass
+
     if json_out:
         data = result.model_dump(mode="json")
         print(json.dumps(data, default=str))
