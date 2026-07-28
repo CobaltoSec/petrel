@@ -822,6 +822,7 @@ def diff(
     old: Annotated[Path, typer.Argument(help="Previous results JSONL")],
     new: Annotated[Path, typer.Argument(help="Current results JSONL")],
     min_risk: Annotated[str, typer.Option("--min-risk")] = "MEDIUM",
+    classify: Annotated[bool, typer.Option("--classify", help="Probe disappeared servers to classify why they vanished")] = False,
 ) -> None:
     """Compare two Petrel results files — show new servers and risk changes."""
     for p in (old, new):
@@ -874,6 +875,19 @@ def diff(
         url: r for url, r in old_map.items()
         if url not in new_map
     }
+
+    # --classify: probe disappeared servers to explain why they vanished
+    if classify and disappeared:
+        from .diff import classify_disappearances_batch
+
+        console.print(f"[cyan]Classifying {len(disappeared)} disappeared server(s)...[/cyan]")
+        groups = asyncio.run(classify_disappearances_batch(list(disappeared.values())))
+        console.print(f"\nDisappeared servers ({len(disappeared)} total):")
+        console.print(f"  [yellow]🔒 auth_added:  {len(groups['auth_added']):>3}[/yellow]  (likely hardened after our scan)")
+        console.print(f"  [red]📴 taken_down:  {len(groups['taken_down']):>3}[/red]")
+        console.print(f"  [blue]🔀 url_changed: {len(groups['url_changed']):>3}[/blue]")
+        console.print(f"  [dim]❓ unknown:     {len(groups['unknown']):>3}[/dim]")
+        console.print()
 
     # F-04: New tools in existing servers
     new_tools: dict[str, list[str]] = {}

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+- classify_disappearance() and classify_disappearances_batch() in diff module: categorizes disappeared servers as auth_added/taken_down/url_changed/unknown (RT-PETREL-DIFF-CLASSIFY)
+- --classify flag for petrel diff: shows categorized breakdown of disappeared servers
+
 ## [PETREL-RUN4] — 2026-07-24
 
 ### Run 4
