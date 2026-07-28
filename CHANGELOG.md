@@ -3,6 +3,11 @@
 ## [Unreleased]
 
 ### Added
+- SQLite run history backend (`petrel/store.py`): persists discover runs to `~/.petrel/runs.db` with tables `runs` + auto-records confirmed/critical counts (PETREL-RUNDB)
+- `petrel history` command: lists all past discover runs with date, label, confirmed count, critical count (PETREL-RUNDB)
+- `petrel trend <metric>` command: shows metric trend across runs (confirmed_count / critical_count / target_count) — baseline for Ekoparty longitudinal analysis (PETREL-RUNDB)
+- `petrel discover` auto-records each run to store (PETREL-RUNDB)
+- `--include-waf` flag for `feed-corvus`: excludes Cloudflare WAF-protected servers by default; skipped count reported (PETREL-CF-WAF)
 - classify_disappearance() and classify_disappearances_batch() in diff module: categorizes disappeared servers as auth_added/taken_down/url_changed/unknown (RT-PETREL-DIFF-CLASSIFY)
 - --classify flag for petrel diff: shows categorized breakdown of disappeared servers
 

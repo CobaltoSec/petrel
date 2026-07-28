@@ -27,6 +27,7 @@ from .discovery.smithery import smithery_search
 from .fingerprint.probe import probe_url, probe_urls_batch
 from .models import MCPServerRecord, RiskTier, SourceResult
 from .scoring.risk import score_server
+from .store import create_run, finish_run
 
 app = typer.Typer(
     name="petrel",
@@ -272,6 +273,8 @@ def discover(
     """Discover exposed MCP servers via passive sources (crt.sh + HuggingFace + Censys + GitHub + npm + Smithery + PyPI + FOFA)."""
     console.print(_BANNER)
 
+    run_id = create_run(label=str(output) if output else None, source="discover", jsonl_path=str(output) if output else None)
+
     async def _run() -> list[MCPServerRecord]:
         import httpx
 
@@ -384,6 +387,8 @@ def discover(
 
     if records:
         _print_summary(records)
+
+    finish_run(run_id, records)
 
     if output and records:
         console.print(f"\n[dim]Results saved incrementally to {output}[/dim]")
@@ -541,6 +546,7 @@ def feed_corvus(
     source: Annotated[Optional[str], typer.Option("--source", "-s",
         help="Filter by discovery source: crtsh|huggingface|github|npm|smithery|pypi|censys|fofa"
     )] = None,
+    include_waf: Annotated[bool, typer.Option("--include-waf", help="Include CDN/WAF-protected servers (behind_cloudflare=true)")] = False,
 ) -> None:
     """Convert Petrel results.jsonl → Corvus batch targets YAML."""
     import yaml  # type: ignore[import]
@@ -587,6 +593,14 @@ def feed_corvus(
     skipped = len(all_records) - len(records)
     if skipped:
         console.print(f"[dim]Skipped {skipped} SSE-legacy servers (corvus doesn't support SSE transport)[/dim]")
+
+    # WAF/CDN filter — skip Cloudflare-protected servers unless --include-waf
+    if not include_waf:
+        waf_filtered = [r for r in records if not r.get("behind_cloudflare", False)]
+        waf_skipped = len(records) - len(waf_filtered)
+        if waf_skipped:
+            console.print(f"[dim]Skipped {waf_skipped} CDN/WAF-protected servers (use --include-waf to include)[/dim]")
+        records = waf_filtered
 
     targets = []
     for r in records:
@@ -1049,6 +1063,40 @@ def report(
 
     if not sarif and not html and not markdown and not csv_fmt:
         console.print("[yellow]Nothing to generate (all formats disabled).[/yellow]")
+
+
+# ---------------------------------------------------------------------------
+# history / trend
+# ---------------------------------------------------------------------------
+
+@app.command()
+def history() -> None:
+    """Show history of Petrel discovery runs."""
+    from .store import list_runs
+    runs = list_runs()
+    if not runs:
+        print("No runs recorded yet. Run 'petrel discover' to start.")
+        return
+    for r in runs:
+        label = r.get("label") or "(unlabeled)"
+        started = (r.get("started_at") or "")[:16]
+        print(f"[{r['id']:3d}] {started}  {label:30s}  confirmed={r['confirmed_count']}  critical={r['critical_count']}")
+
+
+@app.command()
+def trend(
+    metric: Annotated[str, typer.Argument(help="Metric: confirmed_count | critical_count | target_count")] = "confirmed_count",
+) -> None:
+    """Show trend of a metric across runs."""
+    from .store import get_trend
+    data = get_trend(metric)
+    if not data:
+        print(f"No data for metric '{metric}'.")
+        return
+    for r in data:
+        label = r.get("label") or f"run-{r['id']}"
+        started = (r.get("started_at") or "")[:10]
+        print(f"{started}  {label:30s}  {metric}={r.get(metric, 'N/A')}")
 
 
 # ---------------------------------------------------------------------------
