@@ -27,7 +27,8 @@ from .discovery.smithery import smithery_search
 from .fingerprint.probe import probe_url, probe_urls_batch
 from .models import MCPServerRecord, RiskTier, SourceResult
 from .scoring.risk import score_server
-from .store import create_run, finish_run
+from .store import create_run, finish_run, update_server_history
+from .summary import generate_run_summary
 
 app = typer.Typer(
     name="petrel",
@@ -275,7 +276,7 @@ def discover(
 
     run_id = create_run(label=str(output) if output else None, source="discover", jsonl_path=str(output) if output else None)
 
-    async def _run() -> list[MCPServerRecord]:
+    async def _run() -> tuple[list[MCPServerRecord], int]:
         import httpx
 
         # PERF-02: Run all discovery sources in parallel
@@ -319,17 +320,18 @@ def discover(
             urls = [u for u in urls if u not in seen_urls]
             console.print(f"[dim]Resume: skipping {len(seen_urls)} already-confirmed, {len(urls)} remaining[/dim]")
 
-        console.print(f"\n[bold]Candidates:[/bold] {len(urls)}")
+        candidate_count = len(urls)
+        console.print(f"\n[bold]Candidates:[/bold] {candidate_count}")
 
         # C2: --no-probe saves URL list to file
         if no_probe:
             if output:
                 output.write_text("\n".join(urls))
-                console.print(f"[dim]{len(urls)} candidates saved to {output}[/dim]")
+                console.print(f"[dim]{candidate_count} candidates saved to {output}[/dim]")
             else:
                 for u in urls:
                     console.print(f"  {u}")
-            return []
+            return [], candidate_count
 
         # PERF-01: open output file early for incremental writing
         _out_fh = output.open("w", encoding="utf-8") if output else None
@@ -346,7 +348,7 @@ def discover(
                 TimeRemainingColumn(),
                 console=err,
             ) as progress:
-                task = progress.add_task("[cyan]Fingerprinting...", total=len(urls))
+                task = progress.add_task("[cyan]Fingerprinting...", total=candidate_count)
 
                 def _on_result(r: MCPServerRecord) -> None:
                     """Called for each confirmed MCP server (PERF-01 + PERF-07)."""
@@ -381,14 +383,25 @@ def discover(
         if not output:
             confirmed_for_summary = [score_server(r) for r in raw if r is not None and r.is_confirmed_mcp]
 
-        return confirmed_for_summary
+        return confirmed_for_summary, candidate_count
 
-    records = asyncio.run(_run())
+    records, candidate_count = asyncio.run(_run())
 
     if records:
         _print_summary(records)
 
     finish_run(run_id, records)
+
+    # Decay model: track server lifespan across runs
+    _decay = update_server_history(run_id, [r.url for r in records])
+    console.print(
+        f"[dim]Decay model: {_decay['new']} nuevos, {_decay['decayed']} caidos "
+        f"(total activos: {_decay['total_active']})[/dim]"
+    )
+
+    # Post-run funnel summary
+    _summary_path = generate_run_summary(run_id, records, _decay, candidate_count=candidate_count)
+    console.print(f"[dim]Run summary: {_summary_path}[/dim]")
 
     if output and records:
         console.print(f"\n[dim]Results saved incrementally to {output}[/dim]")
