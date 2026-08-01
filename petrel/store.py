@@ -22,7 +22,9 @@ def get_db() -> sqlite3.Connection:
             target_count INTEGER DEFAULT 0,
             confirmed_count INTEGER DEFAULT 0,
             critical_count INTEGER DEFAULT 0,
-            jsonl_path TEXT
+            jsonl_path TEXT,
+            auth_pct REAL DEFAULT NULL,
+            avg_priority_score REAL DEFAULT NULL
         );
         CREATE TABLE IF NOT EXISTS server_history (
             url TEXT PRIMARY KEY,
@@ -32,6 +34,15 @@ def get_db() -> sqlite3.Connection:
             status TEXT NOT NULL DEFAULT 'active'
         );
     """)
+    # Migrate existing DBs that predate these columns — silently skip if present.
+    for _col_ddl in (
+        "ALTER TABLE runs ADD COLUMN auth_pct REAL DEFAULT NULL",
+        "ALTER TABLE runs ADD COLUMN avg_priority_score REAL DEFAULT NULL",
+    ):
+        try:
+            conn.execute(_col_ddl)
+        except sqlite3.OperationalError:
+            pass  # column already exists
     conn.commit()
     return conn
 
@@ -53,10 +64,29 @@ def finish_run(run_id: int, records: list) -> None:
     from datetime import datetime, timezone
     confirmed = len(records)
     critical = sum(1 for r in records if getattr(r, "priority_score", 0) >= 80)
+
+    # auth_pct: % of confirmed servers with real authentication (not 'none'/'unknown')
+    _no_auth = {"none", "unknown"}
+    with_auth = sum(
+        1 for r in records
+        if str(getattr(r, "auth_state", "none")).lower() not in _no_auth
+    )
+    auth_pct: Optional[float] = round(100.0 * with_auth / confirmed, 2) if confirmed else None
+
+    # avg_priority_score: mean priority_score across all confirmed servers
+    scores = [s for r in records if (s := getattr(r, "priority_score", None)) is not None]
+    avg_priority_score: Optional[float] = round(sum(scores) / len(scores), 2) if scores else None
+
     conn = get_db()
     conn.execute(
-        "UPDATE runs SET finished_at=?, confirmed_count=?, critical_count=?, target_count=? WHERE id=?",
-        (datetime.now(timezone.utc).isoformat(), confirmed, critical, confirmed, run_id)
+        "UPDATE runs SET finished_at=?, confirmed_count=?, critical_count=?, target_count=?, "
+        "auth_pct=?, avg_priority_score=? WHERE id=?",
+        (
+            datetime.now(timezone.utc).isoformat(),
+            confirmed, critical, confirmed,
+            auth_pct, avg_priority_score,
+            run_id,
+        ),
     )
     conn.commit()
     conn.close()
@@ -147,7 +177,7 @@ def decay_stats() -> dict:
 
 
 def get_trend(metric: str) -> list:
-    allowed = {"confirmed_count", "critical_count", "target_count"}
+    allowed = {"confirmed_count", "critical_count", "target_count", "auth_pct", "avg_priority_score"}
     if metric not in allowed:
         return []
     conn = get_db()

@@ -731,6 +731,119 @@ def feed_condor(
 
 
 # ---------------------------------------------------------------------------
+# feed-shrike
+# ---------------------------------------------------------------------------
+
+@app.command(name="feed-shrike")
+def feed_shrike(
+    results: Annotated[Path, typer.Argument(help="Petrel results.jsonl file")],
+    output: Annotated[Optional[Path], typer.Option(
+        "--output", "-o",
+        help="Output YAML (default: C:/Proyectos/Shrike/state/targets/petrel-criticals.yaml)",
+    )] = None,
+    filter_source: Annotated[str, typer.Option(
+        "--filter-source", "-s",
+        help="Filter by discovery source (e.g. github, crtsh, npm, smithery)",
+    )] = "github",
+    min_priority: Annotated[int, typer.Option(
+        "--min-priority",
+        help="Minimum priority_score to include (also includes auth=none AND high/critical regardless)",
+    )] = 50,
+) -> None:
+    """Convert Petrel results.jsonl → Shrike targets YAML (github-sourced by default)."""
+    import yaml  # type: ignore[import]
+    from datetime import date as _date
+
+    _DEFAULT_OUTPUT = Path("C:/Proyectos/Shrike/state/targets/petrel-criticals.yaml")
+
+    if not results.exists():
+        err.print(f"[red]File not found: {results}[/red]")
+        raise typer.Exit(1)
+
+    original_records: list[dict] = []
+    for line in results.read_text().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            r = json.loads(line)
+        except Exception:
+            continue
+        original_records.append(r)
+
+    if not original_records:
+        console.print("[yellow]No records found in input file.[/yellow]")
+        raise typer.Exit(0)
+
+    # Filter by source
+    if filter_source:
+        by_source = [r for r in original_records if r.get("discovered_via") == filter_source]
+        if not by_source:
+            available = sorted({r.get("discovered_via", "?") for r in original_records})
+            console.print(
+                f"[yellow]No records with source '{filter_source}'. "
+                f"Available sources: {available}[/yellow]"
+            )
+            raise typer.Exit(0)
+    else:
+        by_source = original_records
+
+    # Filter by priority_score >= min_priority OR (auth=none AND CRITICAL/HIGH)
+    filtered: list[dict] = []
+    for r in by_source:
+        score = r.get("priority_score", 0)
+        auth = r.get("auth_state", "unknown")
+        tier = r.get("risk_tier", "INFO")
+        passes_score = score >= min_priority
+        passes_auth_severity = auth == "none" and tier in ("CRITICAL", "HIGH")
+        if passes_score or passes_auth_severity:
+            filtered.append(r)
+
+    if not filtered:
+        console.print(
+            f"[yellow]No servers passed filters "
+            f"(source={filter_source!r}, min_priority={min_priority}). "
+            f"Total in source: {len(by_source)}.[/yellow]"
+        )
+        raise typer.Exit(0)
+
+    run_date = _date.today().isoformat()
+
+    targets: list[dict] = []
+    for r in filtered:
+        entry = {
+            "url": r.get("final_url") or r["url"],
+            "source": "petrel",
+            "priority_score": r.get("priority_score", 0),
+            "auth": r.get("auth_state", "unknown"),
+            "tools_count": len(r.get("tools", [])),
+            "run_date": run_date,
+        }
+        targets.append(entry)
+
+    # Sort by priority_score descending
+    targets.sort(key=lambda e: -e["priority_score"])
+
+    doc = {"targets": targets}
+    yaml_str = yaml.dump(doc, default_flow_style=False, allow_unicode=True, sort_keys=False)
+
+    out_path = output if output is not None else _DEFAULT_OUTPUT
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(yaml_str, encoding="utf-8")
+
+    console.print(f"[green]✓[/green] {len(targets)} servers exported → {out_path}")
+    for entry in targets[:10]:
+        auth_color = "red" if entry["auth"] == "none" else "dim"
+        console.print(
+            f"  [bold]{entry['priority_score']:3d}[/bold]  "
+            f"[{auth_color}]{entry['auth']:10s}[/{auth_color}]  "
+            f"{entry['url']}"
+        )
+    if len(targets) > 10:
+        console.print(f"  [dim]... and {len(targets) - 10} more[/dim]")
+
+
+# ---------------------------------------------------------------------------
 # stats  (C3)
 # ---------------------------------------------------------------------------
 
@@ -1098,7 +1211,7 @@ def history() -> None:
 
 @app.command()
 def trend(
-    metric: Annotated[str, typer.Argument(help="Metric: confirmed_count | critical_count | target_count")] = "confirmed_count",
+    metric: Annotated[str, typer.Argument(help="Metric: confirmed_count | critical_count | target_count | auth_pct | avg_priority_score")] = "confirmed_count",
 ) -> None:
     """Show trend of a metric across runs."""
     from .store import get_trend

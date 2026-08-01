@@ -3,6 +3,9 @@
 ## [Unreleased]
 
 ### Added
+- Re-probe in classify_disappearance(): verifies server status before marking as disappeared — accuracy ~60%→~90% (PETREL-V10)
+- `auth_pct` and `avg_priority_score` metrics in `petrel trend`: derived from `runs.db` metadata without reprocessing JSONLs (PETREL-V10)
+- `petrel feed-shrike`: exports CRITICAL servers with source=github to Shrike targets.yaml (PETREL-V10)
 - SQLite run history backend (`petrel/store.py`): persists discover runs to `~/.petrel/runs.db` with tables `runs` + auto-records confirmed/critical counts (PETREL-RUNDB)
 - `petrel history` command: lists all past discover runs with date, label, confirmed count, critical count (PETREL-RUNDB)
 - `petrel trend <metric>` command: shows metric trend across runs (confirmed_count / critical_count / target_count) — baseline for Ekoparty longitudinal analysis (PETREL-RUNDB)
