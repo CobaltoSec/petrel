@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-08-01
+
 ### Added
 - Re-probe in classify_disappearance(): verifies server status before marking as disappeared — accuracy ~60%→~90% (PETREL-V10)
 - `auth_pct` and `avg_priority_score` metrics in `petrel trend`: derived from `runs.db` metadata without reprocessing JSONLs (PETREL-V10)
