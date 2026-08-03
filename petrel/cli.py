@@ -26,8 +26,8 @@ from .discovery.shodan import shodan_search
 from .discovery.smithery import smithery_search
 from .fingerprint.probe import probe_url, probe_urls_batch
 from .models import MCPServerRecord, RiskTier, SourceResult
-from .scoring.risk import score_server
-from .store import create_run, finish_run, update_server_history
+from .scoring.risk import apply_persistence_bonus, score_server
+from .store import create_run, finish_run, get_consecutive_runs_map, update_server_history
 from .summary import generate_run_summary
 
 app = typer.Typer(
@@ -333,6 +333,10 @@ def discover(
                     console.print(f"  {u}")
             return [], candidate_count
 
+        # Persistence scoring: pre-load consecutive_confirmed_runs from history
+        # (uses data from previous runs; this run's data is written AFTER probing)
+        _history_map: dict[str, int] = get_consecutive_runs_map(urls)
+
         # PERF-01: open output file early for incremental writing
         _out_fh = output.open("w", encoding="utf-8") if output else None
         confirmed_for_summary: list[MCPServerRecord] = []
@@ -354,6 +358,10 @@ def discover(
                     """Called for each confirmed MCP server (PERF-01 + PERF-07)."""
                     if r.is_confirmed_mcp:
                         scored = score_server(r)
+                        # Apply persistence bonus based on prior confirmed runs
+                        _ccr = _history_map.get(r.url, 0)
+                        if _ccr > 1:
+                            scored = apply_persistence_bonus(scored, _ccr)
                         confirmed_for_summary.append(scored)
                         if _out_fh is not None:
                             _out_fh.write(json.dumps(scored.model_dump(mode="json"), default=str) + "\n")
@@ -381,7 +389,14 @@ def discover(
 
         # If no output file, build confirmed list from raw
         if not output:
-            confirmed_for_summary = [score_server(r) for r in raw if r is not None and r.is_confirmed_mcp]
+            confirmed_for_summary = []
+            for r in raw:
+                if r is not None and r.is_confirmed_mcp:
+                    scored = score_server(r)
+                    _ccr = _history_map.get(r.url, 0)
+                    if _ccr > 1:
+                        scored = apply_persistence_bonus(scored, _ccr)
+                    confirmed_for_summary.append(scored)
 
         return confirmed_for_summary, candidate_count
 
@@ -841,6 +856,138 @@ def feed_shrike(
         )
     if len(targets) > 10:
         console.print(f"  [dim]... and {len(targets) - 10} more[/dim]")
+
+
+# ---------------------------------------------------------------------------
+# feed-ibis
+# ---------------------------------------------------------------------------
+
+# Exec-family tool names (subset of scoring/risk.py _FAMILY_CODE_EXEC)
+_IBIS_EXEC_NAMES = frozenset([
+    "execute_bash", "execute_command", "run_command", "run_script",
+    "execute_script", "run_python", "execute_python", "python_repl",
+    "code_exec", "subprocess_run", "system_exec", "bash", "shell",
+])
+
+
+def _has_exec_cluster(tools: list) -> bool:
+    """Return True if any tool name matches exec-family keywords."""
+    for t in tools:
+        name = (t.get("name", "") if isinstance(t, dict) else getattr(t, "name", "")).lower()
+        if name in _IBIS_EXEC_NAMES or any(p in name for p in _IBIS_EXEC_NAMES):
+            return True
+    return False
+
+
+@app.command(name="feed-ibis")
+def feed_ibis(
+    results: Annotated[Path, typer.Argument(help="Petrel results.jsonl file")],
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Preview without creating ibis stubs")] = False,
+    ibis_bin: Annotated[str, typer.Option("--ibis-bin", help="Path to ibis CLI binary")] = r"C:\Proyectos\Ibis\.venv\Scripts\ibis.exe",
+) -> None:
+    """Generate Ibis disclosure stubs for CRITICAL/HIGH MCP servers found by Petrel.
+
+    Filters: risk_tier CRITICAL or HIGH, AND (auth=none OR exec-cluster tools).
+    Creates a draft advisory in Ibis for each matching server (--dry-run for preview).
+    """
+    import subprocess
+    from urllib.parse import urlparse as _urlparse
+
+    if not results.exists():
+        err.print(f"[red]File not found: {results}[/red]")
+        raise typer.Exit(1)
+
+    _HIGH_TIERS = {"CRITICAL", "HIGH"}
+
+    records: list[dict] = []
+    for line in results.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            r = json.loads(line)
+        except Exception:
+            continue
+        records.append(r)
+
+    # Filter: CRITICAL/HIGH AND (no-auth OR exec cluster)
+    candidates: list[dict] = []
+    for r in records:
+        tier = r.get("risk_tier", "INFO")
+        if tier not in _HIGH_TIERS:
+            continue
+        auth = r.get("auth_state", "unknown")
+        tools = r.get("tools", [])
+        if auth == "none" or _has_exec_cluster(tools):
+            candidates.append(r)
+
+    if not candidates:
+        console.print("[yellow]No CRITICAL/HIGH servers with no-auth or exec cluster found.[/yellow]")
+        raise typer.Exit(0)
+
+    # Build output table
+    table = Table(title=f"Ibis stubs {'(DRY RUN)' if dry_run else ''}", box=None)
+    table.add_column("URL", style="cyan", no_wrap=True)
+    table.add_column("Tier", style="bold")
+    table.add_column("Auth")
+    table.add_column("Package")
+    table.add_column("Status")
+
+    submitted: list[dict] = []
+
+    for r in candidates:
+        url = r.get("final_url") or r["url"]
+        tier = r.get("risk_tier", "HIGH")
+        auth = r.get("auth_state", "unknown")
+        severity = tier.lower()
+
+        # Derive package name from hostname
+        parsed = _urlparse(url)
+        hostname = parsed.hostname or url
+        package = hostname.split(":")[0]  # strip port if present
+
+        tier_color = _TIER_COLOR.get(RiskTier(tier), "white") if tier in RiskTier._value2member_map_ else "white"
+        auth_color = "red" if auth == "none" else "dim"
+
+        if dry_run:
+            status = "[dim]dry-run[/dim]"
+        else:
+            try:
+                proc = subprocess.run(
+                    [ibis_bin, "add", "--package", package, "--severity", severity,
+                     "--source", "manual", "--no-npm"],
+                    capture_output=True, text=True, timeout=15,
+                )
+                if proc.returncode == 0:
+                    # Extract generated GHSA ID from output (first MANUAL-* token)
+                    import re as _re
+                    m = _re.search(r"(MANUAL-[a-f0-9]+)", proc.stdout)
+                    ghsa = m.group(1) if m else "?"
+                    status = f"[green]✓ {ghsa}[/green]"
+                    submitted.append({"url": url, "package": package, "severity": severity, "ghsa": ghsa})
+                else:
+                    status = f"[red]✗ {proc.stderr.strip()[:40]}[/red]"
+            except FileNotFoundError:
+                err.print(f"[red]ibis binary not found: {ibis_bin}[/red]")
+                raise typer.Exit(1)
+            except subprocess.TimeoutExpired:
+                status = "[red]timeout[/red]"
+            except Exception as exc:
+                status = f"[red]error: {exc}[/red]"
+
+        table.add_row(
+            url[:60],
+            f"[{tier_color}]{tier}[/{tier_color}]",
+            f"[{auth_color}]{auth}[/{auth_color}]",
+            package,
+            status,
+        )
+
+    console.print(table)
+    if not dry_run:
+        console.print(f"\n[bold green]✓[/bold green] {len(submitted)}/{len(candidates)} stubs created in Ibis.")
+    else:
+        console.print(f"\n[dim]{len(candidates)} server(s) would be submitted to Ibis (--dry-run).[/dim]")
 
 
 # ---------------------------------------------------------------------------

@@ -380,3 +380,17 @@ def score_server(record: MCPServerRecord) -> MCPServerRecord:
     record.priority_score = min(100, base + bonus)
 
     return record
+
+
+def apply_persistence_bonus(record: MCPServerRecord, consecutive_confirmed_runs: int) -> MCPServerRecord:
+    """Apply persistence bonus to priority_score based on consecutive confirmed runs.
+
+    +10 per run beyond the first, capped at +20:
+      ccr=1 → 0 (first run, no bonus)
+      ccr=2 → +10 (seen twice)
+      ccr=3+ → +20 (max)
+    """
+    if consecutive_confirmed_runs > 1:
+        bonus = min((consecutive_confirmed_runs - 1) * 10, 20)
+        record.priority_score = min(100, record.priority_score + bonus)
+    return record

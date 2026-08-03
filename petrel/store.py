@@ -31,13 +31,15 @@ def get_db() -> sqlite3.Connection:
             first_seen TEXT NOT NULL,
             last_confirmed_at TEXT NOT NULL,
             last_run_id INTEGER,
-            status TEXT NOT NULL DEFAULT 'active'
+            status TEXT NOT NULL DEFAULT 'active',
+            consecutive_confirmed_runs INTEGER DEFAULT 1
         );
     """)
     # Migrate existing DBs that predate these columns — silently skip if present.
     for _col_ddl in (
         "ALTER TABLE runs ADD COLUMN auth_pct REAL DEFAULT NULL",
         "ALTER TABLE runs ADD COLUMN avg_priority_score REAL DEFAULT NULL",
+        "ALTER TABLE server_history ADD COLUMN consecutive_confirmed_runs INTEGER DEFAULT 1",
     ):
         try:
             conn.execute(_col_ddl)
@@ -129,12 +131,16 @@ def update_server_history(run_id: int, confirmed_urls: list[str]) -> dict:
         if url not in existing:
             new_count += 1
         conn.execute(
-            """INSERT INTO server_history (url, first_seen, last_confirmed_at, last_run_id, status)
-               VALUES (?, ?, ?, ?, 'active')
+            """INSERT INTO server_history (url, first_seen, last_confirmed_at, last_run_id, status, consecutive_confirmed_runs)
+               VALUES (?, ?, ?, ?, 'active', 1)
                ON CONFLICT(url) DO UPDATE SET
-                   last_confirmed_at = excluded.last_confirmed_at,
-                   last_run_id       = excluded.last_run_id,
-                   status            = 'active'
+                   last_confirmed_at           = excluded.last_confirmed_at,
+                   last_run_id                 = excluded.last_run_id,
+                   status                      = 'active',
+                   consecutive_confirmed_runs  = CASE
+                       WHEN server_history.status = 'active' THEN server_history.consecutive_confirmed_runs + 1
+                       ELSE 1
+                   END
             """,
             (url, now_iso, now_iso, run_id),
         )
@@ -149,7 +155,8 @@ def update_server_history(run_id: int, confirmed_urls: list[str]) -> dict:
     for (url,) in stale:
         if url not in confirmed_set:
             conn.execute(
-                "UPDATE server_history SET status='decayed' WHERE url=?", (url,)
+                "UPDATE server_history SET status='decayed', consecutive_confirmed_runs=0 WHERE url=?",
+                (url,),
             )
             decayed_count += 1
 
@@ -161,6 +168,24 @@ def update_server_history(run_id: int, confirmed_urls: list[str]) -> dict:
     conn.close()
 
     return {"new": new_count, "decayed": decayed_count, "total_active": total_active}
+
+
+def get_consecutive_runs_map(urls: list[str]) -> dict[str, int]:
+    """Return {url: consecutive_confirmed_runs} for the given URLs.
+
+    URLs not in server_history (i.e. never confirmed before) are omitted
+    from the result, which means the caller should treat missing keys as 0.
+    """
+    if not urls:
+        return {}
+    conn = get_db()
+    placeholders = ",".join("?" * len(urls))
+    rows = conn.execute(
+        f"SELECT url, consecutive_confirmed_runs FROM server_history WHERE url IN ({placeholders})",
+        urls,
+    ).fetchall()
+    conn.close()
+    return {row["url"]: row["consecutive_confirmed_runs"] or 0 for row in rows}
 
 
 def decay_stats() -> dict:
