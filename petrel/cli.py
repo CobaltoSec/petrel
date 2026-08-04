@@ -879,6 +879,62 @@ def _has_exec_cluster(tools: list) -> bool:
     return False
 
 
+def _load_ibis_known() -> dict[str, str]:
+    """Load known packages/URLs from Ibis state.
+
+    Returns a dict mapping normalized identifier → ghsa_id for dedup.
+    Keys are lowercase package names and (where available) normalized server URLs.
+
+    Primary source: SQLite DB at ~/.ibis/ibis.db (always queried first).
+    Secondary source: C:\\Proyectos\\Ibis\\state\\*.json (scanned if directory exists).
+    """
+    import sqlite3
+    from urllib.parse import urlparse as _urlparse
+
+    known: dict[str, str] = {}  # key → ghsa_id
+
+    # Primary: Ibis SQLite DB
+    ibis_db = Path.home() / ".ibis" / "ibis.db"
+    if ibis_db.exists():
+        try:
+            conn = sqlite3.connect(str(ibis_db))
+            rows = conn.execute("SELECT ghsa_id, package FROM advisories").fetchall()
+            conn.close()
+            for ghsa_id, package in rows:
+                if package:
+                    known[package.lower()] = ghsa_id
+        except Exception:
+            pass  # non-fatal — fall through to JSON fallback
+
+    # Secondary: JSON state files (C:\Proyectos\Ibis\state\*.json)
+    ibis_state_dir = Path(r"C:\Proyectos\Ibis\state")
+    if ibis_state_dir.is_dir():
+        for jf in ibis_state_dir.glob("*.json"):
+            try:
+                data = json.loads(jf.read_text(encoding="utf-8"))
+                if not isinstance(data, dict):
+                    continue
+                ghsa_id = data.get("ghsa_id", jf.stem)
+                # Index by package name
+                if "package" in data and data["package"]:
+                    known[data["package"].lower()] = ghsa_id
+                # Index by server_url / target / url hostname
+                for field in ("server_url", "target", "url"):
+                    val = data.get(field)
+                    if val:
+                        known[val.lower()] = ghsa_id
+                        try:
+                            parsed = _urlparse(val)
+                            if parsed.hostname:
+                                known[parsed.hostname.lower()] = ghsa_id
+                        except Exception:
+                            pass
+            except Exception:
+                pass  # skip malformed files
+
+    return known
+
+
 @app.command(name="feed-ibis")
 def feed_ibis(
     results: Annotated[Path, typer.Argument(help="Petrel results.jsonl file")],
@@ -889,6 +945,7 @@ def feed_ibis(
 
     Filters: risk_tier CRITICAL or HIGH, AND (auth=none OR exec-cluster tools).
     Creates a draft advisory in Ibis for each matching server (--dry-run for preview).
+    Skips servers whose package/hostname already exists in Ibis state.
     """
     import subprocess
     from urllib.parse import urlparse as _urlparse
@@ -925,6 +982,13 @@ def feed_ibis(
         console.print("[yellow]No CRITICAL/HIGH servers with no-auth or exec cluster found.[/yellow]")
         raise typer.Exit(0)
 
+    # Dedup guard: load already-known packages/URLs from Ibis state
+    ibis_known: dict[str, str] = _load_ibis_known()
+    if ibis_known:
+        console.print(f"[dim]Ibis dedup: {len(ibis_known)} known identifiers loaded[/dim]")
+    else:
+        console.print("[dim]Ibis dedup: no existing state found (fresh start)[/dim]")
+
     # Build output table
     table = Table(title=f"Ibis stubs {'(DRY RUN)' if dry_run else ''}", box=None)
     table.add_column("URL", style="cyan", no_wrap=True)
@@ -934,6 +998,7 @@ def feed_ibis(
     table.add_column("Status")
 
     submitted: list[dict] = []
+    skipped: list[dict] = []
 
     for r in candidates:
         url = r.get("final_url") or r["url"]
@@ -948,6 +1013,24 @@ def feed_ibis(
 
         tier_color = _TIER_COLOR.get(RiskTier(tier), "white") if tier in RiskTier._value2member_map_ else "white"
         auth_color = "red" if auth == "none" else "dim"
+
+        # Dedup check: skip if package or URL already known in Ibis
+        _dup_key = package.lower()
+        _dup_url_key = url.lower()
+        _existing_ghsa = ibis_known.get(_dup_key) or ibis_known.get(_dup_url_key)
+        if _existing_ghsa:
+            console.print(
+                f"[dim]Skipping {url} — already in Ibis ({_existing_ghsa})[/dim]"
+            )
+            skipped.append({"url": url, "package": package, "existing_ghsa": _existing_ghsa})
+            table.add_row(
+                url[:60],
+                f"[{tier_color}]{tier}[/{tier_color}]",
+                f"[{auth_color}]{auth}[/{auth_color}]",
+                package,
+                f"[dim]skip — {_existing_ghsa}[/dim]",
+            )
+            continue
 
         if dry_run:
             status = "[dim]dry-run[/dim]"
@@ -965,6 +1048,8 @@ def feed_ibis(
                     ghsa = m.group(1) if m else "?"
                     status = f"[green]✓ {ghsa}[/green]"
                     submitted.append({"url": url, "package": package, "severity": severity, "ghsa": ghsa})
+                    # Register in local known map so later entries in same run are also deduped
+                    ibis_known[package.lower()] = ghsa
                 else:
                     status = f"[red]✗ {proc.stderr.strip()[:40]}[/red]"
             except FileNotFoundError:
@@ -985,9 +1070,17 @@ def feed_ibis(
 
     console.print(table)
     if not dry_run:
-        console.print(f"\n[bold green]✓[/bold green] {len(submitted)}/{len(candidates)} stubs created in Ibis.")
+        console.print(
+            f"\n[bold green]✓[/bold green] Added {len(submitted)} / "
+            f"Skipped {len(skipped)} (already in Ibis) / "
+            f"Total candidates {len(candidates)}"
+        )
     else:
-        console.print(f"\n[dim]{len(candidates)} server(s) would be submitted to Ibis (--dry-run).[/dim]")
+        console.print(
+            f"\n[dim]{len(candidates)} server(s) evaluated — "
+            f"{len(skipped)} already in Ibis, "
+            f"{len(candidates) - len(skipped)} would be submitted (--dry-run).[/dim]"
+        )
 
 
 # ---------------------------------------------------------------------------

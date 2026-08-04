@@ -24,7 +24,10 @@ def get_db() -> sqlite3.Connection:
             critical_count INTEGER DEFAULT 0,
             jsonl_path TEXT,
             auth_pct REAL DEFAULT NULL,
-            avg_priority_score REAL DEFAULT NULL
+            avg_priority_score REAL DEFAULT NULL,
+            auth_added INTEGER DEFAULT 0,
+            taken_down INTEGER DEFAULT 0,
+            url_changed INTEGER DEFAULT 0
         );
         CREATE TABLE IF NOT EXISTS server_history (
             url TEXT PRIMARY KEY,
@@ -40,6 +43,9 @@ def get_db() -> sqlite3.Connection:
         "ALTER TABLE runs ADD COLUMN auth_pct REAL DEFAULT NULL",
         "ALTER TABLE runs ADD COLUMN avg_priority_score REAL DEFAULT NULL",
         "ALTER TABLE server_history ADD COLUMN consecutive_confirmed_runs INTEGER DEFAULT 1",
+        "ALTER TABLE runs ADD COLUMN auth_added INTEGER DEFAULT 0",
+        "ALTER TABLE runs ADD COLUMN taken_down INTEGER DEFAULT 0",
+        "ALTER TABLE runs ADD COLUMN url_changed INTEGER DEFAULT 0",
     ):
         try:
             conn.execute(_col_ddl)
@@ -62,7 +68,23 @@ def create_run(label: Optional[str], source: str, jsonl_path: Optional[str] = No
     return run_id
 
 
-def finish_run(run_id: int, records: list) -> None:
+def finish_run(
+    run_id: int,
+    records: list,
+    *,
+    auth_added: int = 0,
+    taken_down: int = 0,
+    url_changed: int = 0,
+) -> None:
+    """Finalise a run row with confirmed record stats and optional disappearance breakdown.
+
+    Args:
+        run_id: ID returned by create_run().
+        records: List of confirmed MCPServerRecord objects for this run.
+        auth_added: Servers from a previous run that now require authentication.
+        taken_down: Servers from a previous run that are unreachable / gone.
+        url_changed: Servers from a previous run that responded on a different URL.
+    """
     from datetime import datetime, timezone
     confirmed = len(records)
     critical = sum(1 for r in records if getattr(r, "priority_score", 0) >= 80)
@@ -82,11 +104,12 @@ def finish_run(run_id: int, records: list) -> None:
     conn = get_db()
     conn.execute(
         "UPDATE runs SET finished_at=?, confirmed_count=?, critical_count=?, target_count=?, "
-        "auth_pct=?, avg_priority_score=? WHERE id=?",
+        "auth_pct=?, avg_priority_score=?, auth_added=?, taken_down=?, url_changed=? WHERE id=?",
         (
             datetime.now(timezone.utc).isoformat(),
             confirmed, critical, confirmed,
             auth_pct, avg_priority_score,
+            auth_added, taken_down, url_changed,
             run_id,
         ),
     )
@@ -202,7 +225,16 @@ def decay_stats() -> dict:
 
 
 def get_trend(metric: str) -> list:
-    allowed = {"confirmed_count", "critical_count", "target_count", "auth_pct", "avg_priority_score"}
+    allowed = {
+        "confirmed_count",
+        "critical_count",
+        "target_count",
+        "auth_pct",
+        "avg_priority_score",
+        "auth_added",
+        "taken_down",
+        "url_changed",
+    }
     if metric not in allowed:
         return []
     conn = get_db()

@@ -5,6 +5,8 @@
 ### Added
 - feat(store): `consecutive_confirmed_runs` column in `server_history` — persistence scoring +10/run confirmado (max +20) aplicado en discover/scan (PETREL-V10)
 - feat(cli): `petrel feed-ibis RESULTS` — genera stubs de disclosure en Ibis para servers CRITICAL/HIGH con no-auth o exec cluster; --dry-run para preview (PETREL-V10)
+- feat(store): runs.db +3 disappearance breakdown columns (auth_added/taken_down/url_changed) + petrel trend support (PETREL-V10)
+- feat(cli): feed-ibis dedup guard vs Ibis/state/*.json — skip already-known servers (PETREL-V10)
 
 ## [0.9.0] — 2026-08-01
 
