@@ -1,0 +1,644 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Petrel — Ekoparty 2026</title>
+<style>
+@media print {
+  *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
+  @page{size:1280px 720px landscape;margin:0}
+  html,body{width:1280px;height:auto;overflow:visible;background:#000}
+  #stage{position:static;width:1280px;height:auto;display:block}
+  #deck{position:static;width:1280px;height:auto;transform:none!important;display:block}
+  .slide{position:relative!important;inset:auto!important;opacity:1!important;pointer-events:all!important;
+         width:1280px;height:720px;display:flex!important;
+         page-break-after:always;break-after:page;page-break-inside:avoid;overflow:hidden}
+  #s15{page-break-after:auto;break-after:auto}
+  .nb,#ctr,#bar{display:none!important}
+}
+</style>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#080d12;
+  --surf:#0e1620;
+  --brd:#1a2840;
+  --t1:#dce8f0;
+  --t2:#4d6880;
+  --acc:#06b6d4;
+  --acc-d:rgba(6,182,212,.1);
+  --crit:#f43f5e;
+  --crit-d:rgba(244,63,94,.08);
+  --hi:#f97316;
+  --lo:#22c55e;
+  --lo-d:rgba(34,197,94,.08);
+  --mono:'Courier New',Consolas,ui-monospace,monospace;
+  --sans:system-ui,-apple-system,'Segoe UI',sans-serif;
+}
+html,body{width:100%;height:100%;background:#000;overflow:hidden}
+#stage{position:fixed;inset:0;display:flex;align-items:center;justify-content:center}
+#deck{position:relative;width:1280px;height:720px;transform-origin:center}
+
+.slide{
+  position:absolute;inset:0;background:var(--bg);
+  display:flex;flex-direction:column;
+  opacity:0;pointer-events:none;transition:opacity .2s ease;
+  background-image:radial-gradient(ellipse 80% 50% at 50% 0%,rgba(6,182,212,.04) 0%,transparent 70%);
+}
+.slide.on{opacity:1;pointer-events:all}
+
+#bar{position:absolute;top:0;left:0;height:2px;background:var(--acc);transition:width .3s;z-index:10}
+#ctr{position:absolute;bottom:18px;right:28px;font:11px/1 var(--mono);color:var(--brd);letter-spacing:.08em;z-index:10;user-select:none}
+.nb{position:absolute;top:50%;transform:translateY(-50%);width:40px;height:40px;
+    background:rgba(255,255,255,.02);border:1px solid var(--brd);border-radius:50%;
+    color:var(--t2);font-size:16px;cursor:pointer;
+    display:flex;align-items:center;justify-content:center;
+    transition:background .15s,color .15s;z-index:20}
+.nb:hover{background:var(--acc-d);color:var(--acc)}
+#bp{left:-56px}#bn{right:-56px}
+
+.inner{flex:1;padding:48px 70px;display:flex;flex-direction:column;overflow:hidden;color:var(--t1)}
+.lbl{display:block;font:600 10px/1 var(--mono);letter-spacing:.18em;text-transform:uppercase;
+     color:var(--acc);margin-bottom:16px}
+.inner h1{font:700 40px/1.1 var(--sans);letter-spacing:-.025em;text-wrap:balance;
+           color:var(--t1);margin-bottom:22px}
+.inner p{font:400 17px/1.65 var(--sans);color:var(--t1)}
+code{font-family:var(--mono);font-size:.88em;color:var(--acc)}
+
+ul.items{list-style:none;display:flex;flex-direction:column;gap:10px}
+ul.items li{font:400 19px/1.5 var(--sans);color:var(--t1);padding-left:22px;position:relative}
+ul.items li::before{content:'›';position:absolute;left:0;color:var(--acc);font-weight:700}
+
+.cb{background:var(--surf);border:1px solid var(--brd);border-left:3px solid var(--acc);
+    border-radius:4px;padding:16px 20px;
+    font:400 13px/1.8 var(--mono);color:#7dd3fc;white-space:pre}
+.cb .dim{color:var(--t2)}
+.cb .ok{color:var(--lo)}
+.cb .crit{color:var(--crit)}
+.cb .hi{color:var(--hi)}
+
+.hl{background:var(--acc-d);border:1px solid rgba(6,182,212,.2);
+    border-radius:4px;padding:14px 18px;
+    font:500 16px/1.6 var(--sans);color:var(--t1)}
+.hl strong{color:var(--acc)}
+.hl.red{background:var(--crit-d);border-color:rgba(244,63,94,.25)}
+.hl.red strong{color:var(--crit)}
+.hl.grn{background:var(--lo-d);border-color:rgba(34,197,94,.2)}
+.hl.grn strong{color:var(--lo)}
+
+.badge{display:inline-block;font:600 9.5px/1 var(--mono);letter-spacing:.1em;
+       padding:3px 8px;border-radius:3px;text-transform:uppercase;flex-shrink:0}
+.bc{background:rgba(244,63,94,.15);color:var(--crit)}
+.bh{background:rgba(249,115,22,.13);color:var(--hi)}
+.bm{background:rgba(6,182,212,.12);color:var(--acc)}
+.bl{background:rgba(34,197,94,.12);color:var(--lo)}
+
+.two{display:grid;grid-template-columns:1fr 1fr;gap:28px}
+.three{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px}
+
+.stat{background:var(--surf);border:1px solid var(--brd);border-top:2px solid var(--acc);
+      border-radius:4px;padding:14px 22px}
+.stat-n{font:700 36px/1 var(--sans);color:var(--acc);letter-spacing:-.03em;
+         font-variant-numeric:tabular-nums}
+.stat-l{font:400 10.5px/1 var(--mono);color:var(--t2);margin-top:5px;letter-spacing:.06em}
+.stat.red{border-top-color:var(--crit)}
+.stat.red .stat-n{color:var(--crit)}
+
+.ag{display:flex;align-items:center;gap:16px;
+    font:400 19px/1 var(--sans);color:var(--t1);
+    padding:11px 0;border-bottom:1px solid rgba(26,40,64,.6)}
+.ag:last-child{border-bottom:none}
+.ag-n{font:700 10.5px/1 var(--mono);color:var(--acc);letter-spacing:.1em;min-width:22px}
+
+.src-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.src{background:var(--surf);border:1px solid var(--brd);border-radius:3px;
+     padding:8px 14px;font:400 12.5px/1 var(--mono);color:var(--t1)}
+.src.hi{border-color:rgba(6,182,212,.4);color:var(--acc)}
+
+.frow{display:flex;align-items:center;gap:14px;
+      padding:9px 0;border-bottom:1px solid rgba(26,40,64,.5);
+      font:400 15px/1 var(--sans)}
+.frow:last-of-type{border-bottom:none}
+.ft{flex:1;color:var(--t1)}
+.fe{font:400 12px/1 var(--mono);color:var(--t2)}
+
+table{width:100%;border-collapse:collapse;font:400 15px/1 var(--sans);font-variant-numeric:tabular-nums}
+th{font:600 10px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;
+   color:var(--acc);padding:10px 14px;text-align:left;border-bottom:1px solid var(--brd)}
+td{padding:9px 14px;color:var(--t1);border-bottom:1px solid rgba(26,40,64,.4)}
+tr:last-child td{border-bottom:none}
+
+/* Title */
+#s1{align-items:center;justify-content:center}
+#s1::before{content:'';position:absolute;width:640px;height:640px;
+  background:radial-gradient(circle,rgba(6,182,212,.07) 0%,transparent 65%);
+  top:50%;left:50%;transform:translate(-50%,-50%);pointer-events:none}
+.t-name{font:900 108px/1 var(--mono);letter-spacing:-.04em;color:var(--acc);
+         position:relative;z-index:1;line-height:.9}
+.t-sub{font:300 21px/1.5 var(--sans);color:var(--t2);text-align:center;margin-top:10px}
+.t-row{display:flex;gap:32px;margin-top:28px;position:relative;z-index:1;align-items:center}
+.t-stat-n{font:700 32px/1 var(--sans);color:var(--acc);text-align:center;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.t-stat-l{font:400 10px/1 var(--mono);color:var(--t2);text-transform:uppercase;letter-spacing:.1em;text-align:center;margin-top:5px}
+.t-div{width:1px;height:48px;background:var(--brd)}
+.t-spkr{font:400 12px/1 var(--mono);color:var(--t2);letter-spacing:.08em;text-align:center;margin-top:30px;position:relative;z-index:1}
+
+/* End */
+#s15{align-items:center;justify-content:center}
+#s15::before{content:'';position:absolute;width:640px;height:640px;
+  background:radial-gradient(circle,rgba(6,182,212,.07) 0%,transparent 65%);
+  top:50%;left:50%;transform:translate(-50%,-50%)}
+</style>
+
+<div id="stage">
+<div id="deck">
+<div id="bar"></div>
+<span id="ctr">1 / 15</span>
+<button class="nb" id="bp">‹</button>
+<button class="nb" id="bn">›</button>
+
+<!-- 1 · Portada -->
+<section class="slide on" id="s1">
+  <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;position:relative;z-index:1">
+    <span class="lbl" style="letter-spacing:.22em;margin-bottom:22px">EKOPARTY 2026 · BUENOS AIRES</span>
+    <div class="t-name">PETREL</div>
+    <div class="t-sub">El scanner que ve lo que Shodan no puede<br>Fingerprinting semántico de servidores MCP expuestos</div>
+    <div class="t-row">
+      <div><div class="t-stat-n">4.100+</div><div class="t-stat-l">candidatos</div></div>
+      <div class="t-div"></div>
+      <div><div class="t-stat-n">462</div><div class="t-stat-l">confirmados</div></div>
+      <div class="t-div"></div>
+      <div><div class="t-stat-n">42</div><div class="t-stat-l" style="color:var(--crit)">CRITICAL</div></div>
+      <div class="t-div"></div>
+      <div><div class="t-stat-n">174</div><div class="t-stat-l">GHSAs</div></div>
+    </div>
+    <div class="t-spkr">NICOLÁS PADILLA — CobaltoSec</div>
+  </div>
+</section>
+
+<!-- 2 · Agenda -->
+<section class="slide" id="s2">
+  <div class="inner">
+    <span class="lbl">AGENDA</span>
+    <h1>De qué vamos a hablar</h1>
+    <div>
+      <div class="ag"><span class="ag-n">01</span>¿Por qué Shodan no puede ver MCP? — El gap semántico</div>
+      <div class="ag"><span class="ag-n">02</span>Petrel — discovery pipeline, sources, arquitectura</div>
+      <div class="ag"><span class="ag-n">03</span>Fingerprinting semántico — MCP JSON-RPC, auth, risk scoring</div>
+      <div class="ag"><span class="ag-n">04</span>Demo en vivo — 4 actos: discover → probe → curl → corvus</div>
+      <div class="ag"><span class="ag-n">05</span>Run 7 — 462 confirmados, 42 CRITICAL, 23% sin auth</div>
+      <div class="ag"><span class="ag-n">06</span>Comparación vs Censys, Knostic, Trend Micro</div>
+      <div class="ag"><span class="ag-n">07</span><code style="font:inherit;color:var(--acc)">pip install cobaltosec-petrel → Corvus → 174 GHSAs</code></div>
+    </div>
+  </div>
+</section>
+
+<!-- 3 · El gap semántico -->
+<section class="slide" id="s3">
+  <div class="inner">
+    <span class="lbl">EL PROBLEMA</span>
+    <h1>21.000 servidores MCP en internet.<br>Nadie sabe qué hacen.</h1>
+    <div class="two" style="flex:1;gap:32px">
+      <div style="display:flex;flex-direction:column;gap:16px">
+        <p style="font-size:16px">MCP cruzó los 21.000 deployments expuestos en 18 meses — de cero a infraestructura crítica de IA más rápido que cualquier protocolo anterior.</p>
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <div style="display:flex;gap:10px;align-items:center;padding:10px 16px;background:var(--surf);border:1px solid var(--brd);border-radius:4px">
+            <span style="color:var(--t2);font:600 11px var(--mono)">CENSYS</span>
+            <span style="color:var(--t2)">→</span>
+            <span style="font-size:15px">IP · ASN · Banner · Port</span>
+            <span style="color:var(--crit);font:600 11px var(--mono);margin-left:auto">sin semántica</span>
+          </div>
+          <div style="display:flex;gap:10px;align-items:center;padding:10px 16px;background:var(--surf);border:1px solid var(--brd);border-radius:4px">
+            <span style="color:var(--t2);font:600 11px var(--mono)">SHODAN</span>
+            <span style="color:var(--t2)">→</span>
+            <span style="font-size:15px">IP · Puerto · SSL</span>
+            <span style="color:var(--crit);font:600 11px var(--mono);margin-left:auto">sin semántica</span>
+          </div>
+          <div style="display:flex;gap:10px;align-items:center;padding:10px 16px;background:var(--acc-d);border:1px solid rgba(6,182,212,.3);border-radius:4px">
+            <span style="color:var(--acc);font:600 11px var(--mono)">PETREL</span>
+            <span style="color:var(--t2)">→</span>
+            <span style="font-size:15px">Tools · Auth · Risk · Capabilities</span>
+            <span style="color:var(--acc);font:600 11px var(--mono);margin-left:auto">semántico</span>
+          </div>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <div class="hl red">Un port scanner ve un socket.<br><br>No puede decirte que el servidor detrás ofrece <strong>execute_bash</strong> a clientes no autenticados.</div>
+        <div class="cb" style="font-size:12.5px"><span class="dim">Censys ve:</span>
+<span class="ok">port: 443  service: HTTP  SSL: ✓</span>
+
+<span class="dim">Petrel ve:</span>
+<span class="ok">tools: execute_bash, read_file</span>
+<span class="crit">auth_state: none</span>
+<span class="crit">risk_tier: CRITICAL</span>
+<span class="ok">priority_score: 97</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 4 · Protocolo MCP -->
+<section class="slide" id="s4">
+  <div class="inner">
+    <span class="lbl">CONTEXTO — MODEL CONTEXT PROTOCOL</span>
+    <h1>MCP: JSON-RPC sobre HTTP o stdio</h1>
+    <div class="two" style="flex:1;gap:28px">
+      <div style="display:flex;flex-direction:column;gap:16px">
+        <ul class="items">
+          <li>Protocolo de Anthropic — standard de facto para AI tools</li>
+          <li>Claude · Cursor · Copilot · Windsurf · n8n</li>
+          <li>Transportes: stdio (local) y Streamable HTTP (internet)</li>
+          <li>Handshake: <code>initialize</code> → <code>tools/list</code> → invoke</li>
+        </ul>
+        <div class="hl"><code>initialize</code> da server name, version, capabilities.<br><strong>Sin auth requerida por defecto en la spec.</strong></div>
+      </div>
+      <div class="cb" style="align-self:flex-start">POST /mcp HTTP/1.1
+Content-Type: application/json
+
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "initialize",
+  "params": {
+    "protocolVersion": "2024-11-05",
+    "clientInfo": {"name": "petrel"}
+  }
+}
+
+<span class="ok">→ 200 OK
+→ serverInfo.name: "prod-data-server"
+→ capabilities.tools: {}</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- 5 · Discovery -->
+<section class="slide" id="s5">
+  <div class="inner">
+    <span class="lbl">DISCOVERY — 11 FUENTES PASIVAS</span>
+    <h1>Petrel descubre lo que no está en índices</h1>
+    <div class="src-grid" style="margin-bottom:20px">
+      <div class="src hi">crt.sh</div>
+      <div class="src hi">HuggingFace Spaces</div>
+      <div class="src hi">GitHub (1k/query)</div>
+      <div class="src hi">npm registry</div>
+      <div class="src">Smithery.ai</div>
+      <div class="src">PyPI</div>
+      <div class="src">Censys</div>
+      <div class="src">FOFA</div>
+      <div class="src">Shodan</div>
+      <div class="src">glama.ai</div>
+      <div class="src">pulsemcp.com</div>
+      <div class="src" style="color:var(--t2);border-style:dashed">+ más</div>
+    </div>
+    <div class="two" style="gap:20px">
+      <div class="hl"><strong>Fingerprint MCP exclusivo:</strong> <code>"2024-11-05"</code><br>
+        Presente en todos los handshakes MCP. Censys no lo indexa — Petrel sí lo busca.</div>
+      <div class="hl"><strong>Descubrimiento paralelo</strong> con <code>asyncio.gather</code>.<br>
+        Dedup por URL normalizada. <code>SourceResult</code> expone errores por fuente.</div>
+    </div>
+  </div>
+</section>
+
+<!-- 6 · Fingerprinting -->
+<section class="slide" id="s6">
+  <div class="inner">
+    <span class="lbl">FINGERPRINTING SEMÁNTICO</span>
+    <h1>Habla el protocolo. No lee el puerto.</h1>
+    <div class="two" style="flex:1;gap:28px">
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <p style="font-size:16px">Para cada candidato, Petrel ejecuta el handshake MCP completo:</p>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <div class="frow"><span class="badge bm">1</span><span class="ft"><code>initialize</code> → server name, version, platform</span></div>
+          <div class="frow"><span class="badge bm">2</span><span class="ft"><code>tools/list</code> (paginado) → inventory completo</span></div>
+          <div class="frow"><span class="badge bm">3</span><span class="ft">Auth check → <code>401/403</code> en data plane</span></div>
+          <div class="frow"><span class="badge bm">4</span><span class="ft">Annotations → <code>destructive</code>, <code>readOnly</code></span></div>
+          <div class="frow"><span class="badge bm">5</span><span class="ft">Platform detection → Vercel/Railway/Fly/HF</span></div>
+        </div>
+      </div>
+      <div class="cb" style="font-size:12px">petrel probe https://target.example.com
+
+<span class="dim">server_name:</span> prod-assistant
+<span class="dim">protocol_version:</span> 2024-11-05
+<span class="dim">platform:</span> railway
+<span class="dim">auth_state:</span> <span class="crit">none</span>
+<span class="dim">behind_cloudflare:</span> false
+
+<span class="dim">tools (12):</span>
+  <span class="crit">execute_bash</span>     [destructive]
+  <span class="hi">read_file</span>        [readOnly: false]
+  <span class="hi">list_directory</span>   [readOnly]
+  <span class="ok">get_weather</span>      [readOnly]
+  ...
+
+<span class="dim">risk_tier:</span> <span class="crit">CRITICAL</span>
+<span class="dim">priority_score:</span> <span class="crit">97/100</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- 7 · Risk Scoring -->
+<section class="slide" id="s7">
+  <div class="inner">
+    <span class="lbl">RISK SCORING</span>
+    <h1>Priority score 0-100 por server</h1>
+    <div class="two" style="flex:1;gap:28px">
+      <div style="display:flex;flex-direction:column;gap:16px">
+        <p style="font-size:15px;color:var(--t1)">El risk tier (<code>CRITICAL/HIGH/LOW/INFO</code>) se calcula de:</p>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <div class="frow"><span class="badge bc">EXEC</span><span class="ft">bash, shell, run_command, code_exec</span></div>
+          <div class="frow"><span class="badge bc">FS_READ</span><span class="ft">read_file, list_dir + sin auth → CRITICAL</span></div>
+          <div class="frow"><span class="badge bh">SAMPLING</span><span class="ft">sampling + FS_READ → CRITICAL</span></div>
+          <div class="frow"><span class="badge bh">NETWORK</span><span class="ft">fetch_url + exfil patterns</span></div>
+          <div class="frow"><span class="badge bm">SCHEMA</span><span class="ft">nested inputSchema (depth ≤ 3)</span></div>
+          <div class="frow"><span class="badge bl">INSTR</span><span class="ft">server_instructions: injection/creds</span></div>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <div class="hl"><strong>priority_score</strong> 0-100: ordena dentro del mismo tier.<br>
+          <code>feed-corvus</code> exporta sorted por score → CS17 ya tiene los 42 CRITICAL primero.</div>
+        <div class="cb" style="font-size:12.5px">petrel feed-corvus results.jsonl \
+  --output targets.yaml
+
+<span class="ok">✓ 450 targets written
+  42 CRITICAL | 4 HIGH | ...
+  sorted by priority_score DESC</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 8 · Demo Acto 1 -->
+<section class="slide" id="s8">
+  <div class="inner">
+    <span class="lbl">DEMO — ACTO 1</span>
+    <h1>petrel discover</h1>
+    <p style="margin-bottom:18px;font-size:16px">Candidatos aparecen en tiempo real desde 11 fuentes simultáneas:</p>
+    <div class="cb">$ petrel discover --output results.jsonl
+
+<span class="ok">▶  crt.sh           ████████░░  80  candidatos
+▶  huggingface       ████████░░  65  candidatos
+▶  github            ████████░░ 142  candidatos
+▶  npm               ████████░░ 980  candidatos
+▶  smithery          ████████░░ 119  candidatos
+▶  censys            ████████░░ 203  candidatos
+▶  shodan            ████████░░  88  candidatos
+...</span>
+
+<span class="ok">Discovered:  4,110  candidates
+Deduped:     2,241  unique URLs
+
+Probing... ████████████████░░  462 / 4,110  ✓ MCP
+Progress:   ETA 4m 32s</span>
+
+<span class="dim">[incremental JSONL — crash-safe]</span></div>
+  </div>
+</section>
+
+<!-- 9 · Demo Acto 2 -->
+<section class="slide" id="s9">
+  <div class="inner">
+    <span class="lbl">DEMO — ACTO 2</span>
+    <h1>petrel probe — mismo IP, diferente historia</h1>
+    <div class="two" style="flex:1;gap:22px">
+      <div>
+        <div style="font:600 10px/1 var(--mono);letter-spacing:.12em;color:var(--crit);text-transform:uppercase;margin-bottom:12px">Lo que Censys ve</div>
+        <div class="cb" style="font-size:12.5px">ip: 34.71.112.88
+port: 443
+service: HTTPS
+ssl: valid
+banner: nginx/1.24.0
+asn: AS15169 Google LLC
+
+<span class="dim">↑ eso es todo.</span></div>
+      </div>
+      <div>
+        <div style="font:600 10px/1 var(--mono);letter-spacing:.12em;color:var(--acc);text-transform:uppercase;margin-bottom:12px">Lo que Petrel ve</div>
+        <div class="cb" style="font-size:12.5px">server_name: inboxguard-prod
+auth_state: <span class="crit">none</span>
+risk_tier: <span class="crit">CRITICAL</span>
+
+tools (8):
+  <span class="crit">read_inbox</span>   — lee emails del usuario
+  <span class="crit">delete_email</span> — elimina emails
+  <span class="hi">search_contacts</span>
+  <span class="hi">forward_email</span> [destructive]
+  ...
+
+server_instructions: <span class="crit">"Always include
+  API key in X-Auth header"</span>
+priority_score: <span class="crit">94/100</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 10 · Demo Acto 3 -->
+<section class="slide" id="s10">
+  <div class="inner">
+    <span class="lbl">DEMO — ACTO 3</span>
+    <h1>"Esto no es un ataque sofisticado.<br>Es curl."</h1>
+    <div class="cb" style="margin-bottom:20px">curl -s -X POST https://target.example.com/mcp \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0", "id": 1,
+    "method": "tools/call",
+    "params": {
+      "name": "execute_bash",
+      "arguments": { "command": "id && cat /etc/passwd" }
+    }
+  }'</div>
+    <div class="two" style="gap:20px">
+      <div class="hl red"><strong>No corremos el comando.</strong> Lo mostramos.<br><br>
+        La pregunta no es "¿se puede?" — el servidor está en producción y no tiene auth. La pregunta es cuánto tardó alguien en llegar primero.</div>
+      <div class="hl"><strong>Sin credenciales. Sin sesión. Sin token.</strong><br><br>
+        El mismo request que haría cualquier cliente MCP legítimo. No hay forma de distinguirlo en los logs.</div>
+    </div>
+  </div>
+</section>
+
+<!-- 11 · Demo Acto 4 -->
+<section class="slide" id="s11">
+  <div class="inner">
+    <span class="lbl">DEMO — ACTO 4</span>
+    <h1>petrel feed-corvus → corvus batch</h1>
+    <p style="margin-bottom:18px;font-size:16px">Petrel encuentra. Corvus audita. El pipeline completo:</p>
+    <div class="cb">$ petrel feed-corvus results.jsonl \
+    --output targets.yaml
+
+<span class="ok">✓ 450 HTTP targets (42 CRITICAL first)
+✓ targets.yaml ready for Corvus CS17</span>
+
+$ corvus batch \
+    --targets targets.yaml \
+    --format sarif
+
+<span class="ok">Scanning 450 targets (HTTP transport)...
+  ████████████████████  450 / 450
+
+Finding: GHSA-xxxx · inboxguard.io
+  ↳ Unauthenticated email access
+  ↳ Severity: CRITICAL
+  ↳ Evidence: DELETE /inbox/all → 200 OK</span>
+
+<span class="dim">174 GHSAs filed from this pipeline</span></div>
+  </div>
+</section>
+
+<!-- 12 · Run 7 results -->
+<section class="slide" id="s12">
+  <div class="inner">
+    <span class="lbl">RUN 3 — JULIO 2026</span>
+    <h1>462 servidores MCP confirmados</h1>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:22px">
+      <div class="stat"><div class="stat-n">4.100+</div><div class="stat-l">candidatos</div></div>
+      <div class="stat"><div class="stat-n">462</div><div class="stat-l">confirmados (11.3%)</div></div>
+      <div class="stat red"><div class="stat-n">41</div><div class="stat-l">CRITICAL</div></div>
+      <div class="stat red"><div class="stat-n">23%</div><div class="stat-l">sin auth</div></div>
+    </div>
+    <div class="two" style="gap:22px">
+      <div>
+        <div style="font:600 10px/1 var(--mono);letter-spacing:.12em;color:var(--t2);text-transform:uppercase;margin-bottom:12px">Por fuente (Run 7)</div>
+        <div class="frow"><span class="fe" style="min-width:100px">Smithery</span><span class="ft">45 reales (38% conversión)</span></div>
+        <div class="frow"><span class="fe" style="min-width:100px">GitHub</span><span class="ft">README parsing → +32 URLs</span></div>
+        <div class="frow"><span class="fe" style="min-width:100px">Shodan</span><span class="ft"><code>"2024-11-05"</code> → highest signal</span></div>
+        <div class="frow"><span class="fe" style="min-width:100px">glama/pulse</span><span class="ft">registries → 28 nuevos</span></div>
+      </div>
+      <div>
+        <div class="hl">Pool acumulado: <strong>700+ MCP servers confirmados</strong><br>(7 runs · Run 7: 462 · último 2026-08-03)</div>
+        <div class="hl red" style="margin-top:12px">De los 42 CRITICAL: <strong>todos sin autenticación</strong>.<br>Capacidades: shell exec, FS access, email, DB.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 13 · Comparación -->
+<section class="slide" id="s13">
+  <div class="inner">
+    <span class="lbl">COMPARACIÓN — TRABAJO EXISTENTE</span>
+    <h1>El gap semántico que los demás no cierran</h1>
+    <div style="overflow-x:auto;margin-bottom:18px">
+      <table>
+        <thead><tr><th>Investigación</th><th>Qué hace</th><th>Qué no hace</th><th>Servers</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Censys (abr. 2026)</strong></td><td>Localiza 21K servers por IP/ASN/banner</td><td>No sabe qué tools expone ninguno</td><td>21.000+</td></tr>
+          <tr><td><strong>Knostic</strong></td><td>Verifica 119 servers manualmente</td><td>Sin dynamic risk scoring, sin pipeline</td><td>119</td></tr>
+          <tr><td><strong>Trend Micro</strong></td><td>Encuentra 492 sin auth</td><td>Sin tool-level fingerprinting</td><td>492</td></tr>
+          <tr><td style="color:var(--acc)"><strong>Petrel</strong></td><td style="color:var(--acc)">Habla MCP, extrae tool inventory, score 0-100, feed-corvus</td><td>—</td><td style="color:var(--acc)">462+</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="hl">La diferencia no es cuántos servers escaneamos.<br>
+      Es <strong>qué sabemos de cada uno</strong> después del scan.</div>
+  </div>
+</section>
+
+<!-- 14 · Disclosure -->
+<section class="slide" id="s14">
+  <div class="inner">
+    <span class="lbl">RESPONSIBLE DISCLOSURE</span>
+    <h1>Petrel → Corvus → GHSAs</h1>
+    <div class="two" style="flex:1;gap:28px">
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="stat"><div class="stat-n">174</div><div class="stat-l">GHSAs filed</div></div>
+          <div class="stat bl"><div class="stat-n" style="color:var(--lo)">3</div><div class="stat-l">publicados</div></div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:9px;font:12.5px var(--mono)">
+          <div style="color:var(--t1)"><span class="badge bc">GHSA</span> inboxguard.io — unauthenticated email</div>
+          <div style="color:var(--t1)"><span class="badge bh">GHSA</span> glimind.com — SSRF CRITICAL</div>
+          <div style="color:var(--t1)"><span class="badge bh">GHSA</span> finvestai — prompt injection</div>
+          <div style="color:var(--t2)">+ 47 en disclosure (90d timeline)</div>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <p style="font-size:16px">El pipeline completo:</p>
+        <div class="cb" style="font-size:12.5px">petrel discover          # encuentra
+petrel probe              # fingerprinta
+petrel feed-corvus        # prioriza
+corvus batch              # audita
+ibis sync --source corvus # drafts
+ibis publish ghsa-xxxx    # publica</div>
+        <div class="hl grn"><strong>Corvus</strong> — el complemento de esta charla.<br>
+          Petrel descubre los 21.000. Corvus audita los 462 que confirmamos.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 15 · Fin -->
+<section class="slide" id="s15">
+  <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;
+              height:100%;position:relative;z-index:1;gap:0">
+    <span class="lbl" style="letter-spacing:.18em;margin-bottom:20px">DEMO EN VIVO</span>
+    <div style="font:700 54px/1.2 var(--sans);color:var(--t1);text-align:center;
+                letter-spacing:-.03em;text-wrap:balance">
+      Shodan cuenta puertas.<br>
+      <span style="color:var(--acc)">Nosotros preguntamos qué hay adentro.</span>
+    </div>
+    <div style="width:320px;height:1px;background:var(--brd);margin:28px 0"></div>
+    <div class="cb" style="font-size:14px;text-align:left">$ pip install cobaltosec-petrel
+$ petrel discover --output results.jsonl
+$ petrel feed-corvus results.jsonl --output targets.yaml</div>
+    <div style="font:400 13px/1 var(--mono);color:var(--acc);margin-top:18px">
+      github.com/CobaltoSec/petrel
+    </div>
+    <div style="font:400 12px/1 var(--mono);color:var(--t2);letter-spacing:.06em;margin-top:28px">
+      NICOLÁS PADILLA · CobaltoSec · nicolas@cobalto-sec.tech
+    </div>
+  </div>
+</section>
+
+</div>
+</div>
+
+<script>
+const slides = document.querySelectorAll('.slide');
+const bar = document.getElementById('bar');
+const ctr = document.getElementById('ctr');
+const deck = document.getElementById('deck');
+let cur = 0;
+const tot = slides.length;
+
+function show(n) {
+  slides[cur].classList.remove('on');
+  cur = (n + tot) % tot;
+  slides[cur].classList.add('on');
+  bar.style.width = ((cur + 1) / tot * 100) + '%';
+  ctr.textContent = (cur + 1) + ' / ' + tot;
+}
+
+function nav(d) { show(cur + d); }
+
+document.addEventListener('keydown', e => {
+  const map = {
+    ArrowRight: 1, ArrowDown: 1, ' ': 1,
+    ArrowLeft: -1, ArrowUp: -1,
+  };
+  if (map[e.key] !== undefined) {
+    e.preventDefault();
+    nav(map[e.key]);
+  }
+  if (e.key === 'Home') show(0);
+  if (e.key === 'End') show(tot - 1);
+});
+
+document.getElementById('bp').addEventListener('click', () => nav(-1));
+document.getElementById('bn').addEventListener('click', () => nav(1));
+
+let tx = 0;
+document.addEventListener('touchstart', e => { tx = e.touches[0].clientX; }, { passive: true });
+document.addEventListener('touchend', e => {
+  const d = e.changedTouches[0].clientX - tx;
+  if (Math.abs(d) > 40) nav(d < 0 ? 1 : -1);
+}, { passive: true });
+
+function scale() {
+  const s = Math.min(window.innerWidth / 1280, window.innerHeight / 720);
+  deck.style.transform = `scale(${s})`;
+}
+window.addEventListener('resize', scale);
+scale();
+show(0);
+</script>
+</body>
+</html>
