@@ -115,6 +115,16 @@ def finish_run(
     )
     conn.commit()
     conn.close()
+    try:
+        from cobaltosec_hub import emit as _hub_emit
+        _hub_emit("petrel.run.completed", {
+            "confirmed_count": confirmed,
+            "critical_count": critical,
+            "jsonl_path": "",
+            "label": "",
+        })
+    except Exception:
+        pass
 
 
 def list_runs() -> list:

@@ -862,6 +862,13 @@ def feed_shrike(
 # feed-ibis
 # ---------------------------------------------------------------------------
 
+# Packages that are testing utilities, NOT real MCP servers — skip in feed-ibis
+_IBIS_NON_MCP_PACKAGES: frozenset[str] = frozenset({
+    "mock", "smoke", "mutating", "python",
+    "jest", "mocha", "chai", "sinon", "jasmine", "karma", "ava", "tap",
+    "vitest", "supertest", "nock", "proxyquire", "rewire",
+})
+
 # Exec-family tool names (subset of scoring/risk.py _FAMILY_CODE_EXEC)
 _IBIS_EXEC_NAMES = frozenset([
     "execute_bash", "execute_command", "run_command", "run_script",
@@ -1013,6 +1020,16 @@ def feed_ibis(
 
         tier_color = _TIER_COLOR.get(RiskTier(tier), "white") if tier in RiskTier._value2member_map_ else "white"
         auth_color = "red" if auth == "none" else "dim"
+
+        # Blacklist: skip known testing utilities / non-MCP package names
+        _bare = package.lower().lstrip("@").split("/")[-1].split(".")[0]
+        if _bare in _IBIS_NON_MCP_PACKAGES or package.lower() in _IBIS_NON_MCP_PACKAGES:
+            console.print(f"[dim]Skipping {url} — blacklisted package name ({package})[/dim]")
+            skipped.append({"url": url, "package": package, "existing_ghsa": "blacklisted"})
+            table.add_row(url[:60], f"[{tier_color}]{tier}[/{tier_color}]",
+                          f"[{auth_color}]{auth}[/{auth_color}]", package,
+                          "[dim]skip — blacklisted[/dim]")
+            continue
 
         # Dedup check: skip if package or URL already known in Ibis
         _dup_key = package.lower()
