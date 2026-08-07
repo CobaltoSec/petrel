@@ -198,65 +198,39 @@ python -m build && twine upload dist/cobaltosec_petrel-0.8.0*
 
 ---
 
-## PETREL-LONGITUDINAL — prerequisites Paper #2 `URGENTE — antes del próximo run`
+## PETREL-LONGITUDINAL — ✅ CERRADO (2026-08-07)
 
-**Contexto:** Paper #2 (P2-LONGITUDINAL, target ACM IMC 2027) requiere que los runs se puedan joinear entre sí por servidor. Hoy los runs son independientes — no hay cross-run panel. Estos cambios deben implementarse ANTES del próximo `petrel discover` o el run siguiente acumula datos que no se pueden unir al análisis temporal.
+**4 deliverables + 3 tests → 279/279 tests. Backfill: 1232 snapshots (Runs 5/6/7).**
 
-### D1 — server_run_snapshots en runs.db
+- D1: `server_run_snapshots` table en runs.db (run_id INTEGER FK, 9 columnas, 2 índices) ✅
+- D2: `tool_name_hash` sha256[:16] en MCPServerRecord + probe.py (ambas rutas: streamable + SSE) ✅
+- D3: `capability_cluster: list[str]` + `petrel_version` al JSONL; `_detect_clusters()` → 3-tuple ✅
+- D4: `scripts/backfill_snapshots.py` — Runs 5/6/7 backfilleados; Runs 1-4 perdidos (anecdóticos) ✅
 
-Agregar tabla al schema de `petrel/store.py`:
+**Gotchas:**
+- `run_id` FK = INTEGER (no TEXT como decía la spec original)
+- `petrel_version` va en AMBAS rutas de cli.py (no solo en `_on_result` — falla sin `--output`)
+- `str(RiskTier.HIGH)` → `"RiskTier.HIGH"` — usar `.value` en store
 
-```sql
-CREATE TABLE IF NOT EXISTS server_run_snapshots (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    run_id TEXT NOT NULL,
-    url TEXT NOT NULL,
-    tool_name_hash TEXT,        -- sha256(sorted(tool_names)), NULL si tools/list falló
-    tool_count INTEGER,
-    auth_state TEXT,
-    risk_tier TEXT,
-    priority_score REAL,
-    capability_cluster TEXT,    -- JSON array de clusters
-    petrel_version TEXT,
-    scanned_at TEXT,            -- ISO8601
-    FOREIGN KEY (run_id) REFERENCES runs(run_id)
-);
-CREATE INDEX IF NOT EXISTS idx_snapshots_url ON server_run_snapshots(url);
-CREATE INDEX IF NOT EXISTS idx_snapshots_run ON server_run_snapshots(run_id);
-```
+---
 
-Al finalizar `petrel discover`, insertar un row por cada MCPServerRecord confirmado.
+## PETREL-RUN8 — próximo ⚡ DESBLOQUEADO
 
-### D2 — tool_signature_hash en MCPServerRecord + JSONL
+**Run 8 con v0.9.0 + longitudinal tracking activo.**
 
-En `petrel/models.py` (MCPServerRecord), agregar campo:
-```python
-tool_name_hash: str | None = None  # sha256(sorted([t.name for t in tools]))
-```
+- D1: `petrel discover` → Run 8 JSONL (`outputs/results-run8.jsonl`)
+- D2: Verificar `server_run_snapshots` populado post-run (petrel_version, tool_name_hash, capability_cluster presentes)
+- D3: `petrel diff` Run 7 vs Run 8 → nuevos / desaparecidos / escalados
+- D4: `petrel feed-corvus` → `targets-run8.yaml` → CS21 (si hay CRITICAL nuevos)
+- D5: `petrel feed-ibis` → stubs de disclosure para net-new CRITICAL sin auth
 
-Computar en `petrel/probe.py` post tools/list:
-```python
-import hashlib, json
-names = sorted(t.name for t in tools)
-record.tool_name_hash = hashlib.sha256(json.dumps(names).encode()).hexdigest()[:16]
-```
+---
 
-Hash corto (16 chars) para legibilidad. Persistir en JSONL output.
+## PETREL-1.0 — bloque separado
 
-### D3 — capability_cluster + petrel_version al JSONL
-
-`capability_cluster` ya se computa en `risk.py` pero no se persiste al JSONL. Agregar al serializer de MCPServerRecord. También agregar `petrel_version` usando `importlib.metadata.version("cobaltosec-petrel")`.
-
-### D4 — Backfill Runs 5-7 desde JSONL existentes
-
-Script one-shot `scripts/backfill_snapshots.py` que lee los JSONL de Runs 5, 6, 7 (si existen en `~/.petrel/`) e inserta rows en `server_run_snapshots` con `tool_name_hash=NULL` donde no se pueda computar.
-
-Confirmar o documentar pérdida de Runs 1-4 — si los JSONL no están, el finding de los 193 servers desaparecidos no puede ir a una tabla del paper (queda como observación anecdótica en metodología).
-
-### Tests necesarios
-
-- `test_store_snapshots`: insert + query por run_id y url
-- `test_tool_name_hash`: mismo set de tools → mismo hash; order-invariant
-- `test_jsonl_fields`: capability_cluster y petrel_version presentes en output
-
-**Archivos:** `petrel/store.py`, `petrel/models.py`, `petrel/probe.py`, `petrel/cli.py` (insert en discover), `scripts/backfill_snapshots.py`
+| Item | Contenido |
+|------|-----------|
+| README | Refresh completo para v0.9.0+ (9 comandos, 11 sources, longitudinal tracking) |
+| `petrel.toml` | Config file paralelo a `corvus.toml` (sources on/off, API keys, output dir) |
+| [Unreleased] → v1.0.0 | Flush V10 + LONGITUDINAL items; tag v1.0.0 |
+| PyPI v1.0.0 | Token manual scoped a `cobaltosec-petrel` |

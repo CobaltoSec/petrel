@@ -109,30 +109,30 @@ _FAMILY_MESSAGING = frozenset([
 ])
 
 
-def _detect_clusters(tools: list) -> list[tuple[RiskTier, str]]:
+def _detect_clusters(tools: list) -> list[tuple[RiskTier, str, str]]:
     names = {t.name.lower() for t in tools}
     # SR-09: tools individually scored CRITICAL count as implicit exec-family
     critical_names = {t.name.lower() for t in tools if t.risk_tier == RiskTier.CRITICAL}
-    findings: list[tuple[RiskTier, str]] = []
+    findings: list[tuple[RiskTier, str, str]] = []
     exec_hits = sorted((names & _FAMILY_CODE_EXEC) | critical_names)
     net_hits = sorted(names & _FAMILY_NETWORK)
     msg_hits = sorted(names & _FAMILY_MESSAGING)
     fs_read_hits = sorted(names & _FAMILY_FS_READ)
     fs_write_hits = sorted(names & _FAMILY_FS_WRITE)
     if exec_hits and net_hits:
-        findings.append((RiskTier.CRITICAL, f"exfiltration cluster: exec={exec_hits} + network={net_hits}"))
+        findings.append((RiskTier.CRITICAL, f"exfiltration cluster: exec={exec_hits} + network={net_hits}", "exec+network"))
     if exec_hits and msg_hits:
-        findings.append((RiskTier.CRITICAL, f"exfiltration cluster: exec={exec_hits} + messaging={msg_hits}"))
+        findings.append((RiskTier.CRITICAL, f"exfiltration cluster: exec={exec_hits} + messaging={msg_hits}", "exec+messaging"))
     if fs_read_hits and net_hits:
-        findings.append((RiskTier.CRITICAL, f"exfiltration cluster: read={fs_read_hits} + network={net_hits}"))
+        findings.append((RiskTier.CRITICAL, f"exfiltration cluster: read={fs_read_hits} + network={net_hits}", "read+network"))
     if fs_read_hits and msg_hits:
-        findings.append((RiskTier.CRITICAL, f"exfiltration cluster: read={fs_read_hits} + messaging={msg_hits}"))
+        findings.append((RiskTier.CRITICAL, f"exfiltration cluster: read={fs_read_hits} + messaging={msg_hits}", "read+messaging"))
     if fs_write_hits and net_hits:
-        findings.append((RiskTier.HIGH, f"supply-chain cluster: write={fs_write_hits} + network={net_hits}"))
+        findings.append((RiskTier.HIGH, f"supply-chain cluster: write={fs_write_hits} + network={net_hits}", "write+network"))
     if len(exec_hits) >= 2:
-        findings.append((RiskTier.CRITICAL, f"redundant exec cluster: {exec_hits}"))
+        findings.append((RiskTier.CRITICAL, f"redundant exec cluster: {exec_hits}", "redundant_exec"))
     if fs_read_hits and fs_write_hits:
-        findings.append((RiskTier.HIGH, f"full filesystem cluster: read={fs_read_hits} + write={fs_write_hits}"))
+        findings.append((RiskTier.HIGH, f"full filesystem cluster: read={fs_read_hits} + write={fs_write_hits}", "full_fs"))
     return findings
 
 
@@ -285,9 +285,12 @@ def score_server(record: MCPServerRecord) -> MCPServerRecord:
                 reasons.append(f"tool '{tool.name}' ({tool.risk_tier})")
 
     # 3. Tool clustering (S3) → capability
-    for tier, reason in _detect_clusters(scored_tools):
+    cluster_labels: list[str] = []
+    for tier, reason, cluster_key in _detect_clusters(scored_tools):
         capability_tier = worst_tier(capability_tier, tier)
         reasons.append(reason)
+        cluster_labels.append(cluster_key)
+    record.capability_cluster = cluster_labels
 
     # 4. Wide attack surface + dangerous server name (S4) → structural only
     tool_count = len(scored_tools)

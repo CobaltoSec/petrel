@@ -7,6 +7,12 @@
 - feat(cli): `petrel feed-ibis RESULTS` — genera stubs de disclosure en Ibis para servers CRITICAL/HIGH con no-auth o exec cluster; --dry-run para preview (PETREL-V10)
 - feat(store): runs.db +3 disappearance breakdown columns (auth_added/taken_down/url_changed) + petrel trend support (PETREL-V10)
 - feat(cli): feed-ibis dedup guard vs Ibis/state/*.json — skip already-known servers (PETREL-V10)
+- feat(store): `server_run_snapshots` table — one row per confirmed server per run; FK to runs.id (INTEGER); indices idx_snapshots_url + idx_snapshots_run; `insert_run_snapshots()` bulk insert (PETREL-LONGITUDINAL)
+- feat(models): `tool_name_hash` — sha256(sorted(tool_names))[:16]; computed in both _probe_streamable and _probe_sse post tools/list (PETREL-LONGITUDINAL)
+- feat(models): `capability_cluster: list[str]` — cluster keys persisted to JSONL (e.g. "exec+network"); `petrel_version` — scanner version at scan time (PETREL-LONGITUDINAL)
+- feat(scoring): `_detect_clusters()` returns 3-tuple (tier, reason, cluster_key) — cluster_key populated into `record.capability_cluster` (PETREL-LONGITUDINAL)
+- feat(cli): `petrel_version = __version__` set on every confirmed record in both output paths (--output and bare discover); `insert_run_snapshots()` called post-finish_run (PETREL-LONGITUDINAL)
+- scripts/backfill_snapshots.py — one-shot backfill of Runs 5-7 into server_run_snapshots; orphan JSONL detection (PETREL-LONGITUDINAL)
 
 ## [0.9.0] — 2026-08-01
 

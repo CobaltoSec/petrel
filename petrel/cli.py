@@ -27,7 +27,7 @@ from .discovery.smithery import smithery_search
 from .fingerprint.probe import probe_url, probe_urls_batch
 from .models import MCPServerRecord, RiskTier, SourceResult
 from .scoring.risk import apply_persistence_bonus, score_server
-from .store import create_run, finish_run, get_consecutive_runs_map, update_server_history
+from .store import create_run, finish_run, get_consecutive_runs_map, insert_run_snapshots, update_server_history
 from .summary import generate_run_summary
 
 app = typer.Typer(
@@ -358,6 +358,7 @@ def discover(
                     """Called for each confirmed MCP server (PERF-01 + PERF-07)."""
                     if r.is_confirmed_mcp:
                         scored = score_server(r)
+                        scored.petrel_version = __version__
                         # Apply persistence bonus based on prior confirmed runs
                         _ccr = _history_map.get(r.url, 0)
                         if _ccr > 1:
@@ -393,6 +394,7 @@ def discover(
             for r in raw:
                 if r is not None and r.is_confirmed_mcp:
                     scored = score_server(r)
+                    scored.petrel_version = __version__
                     _ccr = _history_map.get(r.url, 0)
                     if _ccr > 1:
                         scored = apply_persistence_bonus(scored, _ccr)
@@ -406,6 +408,9 @@ def discover(
         _print_summary(records)
 
     finish_run(run_id, records)
+    n_snaps = insert_run_snapshots(run_id, records)
+    if n_snaps:
+        console.print(f"[dim]Longitudinal: {n_snaps} snapshots saved[/dim]")
 
     # Decay model: track server lifespan across runs
     _decay = update_server_history(run_id, [r.url for r in records])

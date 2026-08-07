@@ -37,6 +37,22 @@ def get_db() -> sqlite3.Connection:
             status TEXT NOT NULL DEFAULT 'active',
             consecutive_confirmed_runs INTEGER DEFAULT 1
         );
+        CREATE TABLE IF NOT EXISTS server_run_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id INTEGER NOT NULL,
+            url TEXT NOT NULL,
+            tool_name_hash TEXT,
+            tool_count INTEGER,
+            auth_state TEXT,
+            risk_tier TEXT,
+            priority_score REAL,
+            capability_cluster TEXT,
+            petrel_version TEXT,
+            scanned_at TEXT,
+            FOREIGN KEY (run_id) REFERENCES runs(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_snapshots_url ON server_run_snapshots(url);
+        CREATE INDEX IF NOT EXISTS idx_snapshots_run ON server_run_snapshots(run_id);
     """)
     # Migrate existing DBs that predate these columns — silently skip if present.
     for _col_ddl in (
@@ -232,6 +248,58 @@ def decay_stats() -> dict:
     ).fetchone()[0]
     conn.close()
     return {"active_count": active, "decayed_count": decayed}
+
+
+def insert_run_snapshots(run_id: int, records: list) -> int:
+    """Bulk-insert one snapshot per confirmed record into server_run_snapshots.
+
+    petrel_version is resolved from importlib.metadata if not already set on the record.
+    Returns the number of rows inserted.
+    """
+    import importlib.metadata as _meta
+    import json as _json
+    try:
+        _pv = _meta.version("cobaltosec-petrel")
+    except Exception:
+        _pv = None
+
+    rows = []
+    for r in records:
+        scanned_at = getattr(r, "scanned_at", None)
+        if hasattr(scanned_at, "isoformat"):
+            scanned_at = scanned_at.isoformat()
+        else:
+            scanned_at = str(scanned_at) if scanned_at else None
+        pv = getattr(r, "petrel_version", None) or _pv
+        _auth = getattr(r, "auth_state", "")
+        _tier = getattr(r, "risk_tier", "")
+        rows.append((
+            run_id,
+            getattr(r, "url", ""),
+            getattr(r, "tool_name_hash", None),
+            len(getattr(r, "tools", [])),
+            _auth.value if hasattr(_auth, "value") else str(_auth),
+            _tier.value if hasattr(_tier, "value") else str(_tier),
+            getattr(r, "priority_score", None),
+            _json.dumps(getattr(r, "capability_cluster", [])),
+            pv,
+            scanned_at,
+        ))
+
+    if not rows:
+        return 0
+
+    conn = get_db()
+    conn.executemany(
+        "INSERT INTO server_run_snapshots "
+        "(run_id,url,tool_name_hash,tool_count,auth_state,risk_tier,"
+        "priority_score,capability_cluster,petrel_version,scanned_at) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?)",
+        rows,
+    )
+    conn.commit()
+    conn.close()
+    return len(rows)
 
 
 def get_trend(metric: str) -> list:

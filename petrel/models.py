@@ -135,6 +135,11 @@ class MCPServerRecord(BaseModel):
     response_time_ms: int | None = None
     probe_error_type: str | None = None  # "down" | "timeout" | "non_mcp" | "error"
 
+    # M5 — longitudinal tracking
+    tool_name_hash: str | None = None       # sha256(sorted(tool_names))[:16]; None if tools/list failed
+    capability_cluster: list[str] = []      # cluster keys e.g. ["exec+network"]
+    petrel_version: str | None = None       # scanner version at scan time
+
     @property
     def is_confirmed_mcp(self) -> bool:
         return self.protocol != Protocol.UNKNOWN

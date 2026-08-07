@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json as _json
 import re
 import time
 from typing import Callable
@@ -264,6 +266,9 @@ async def _probe_streamable(url: str, client: httpx.AsyncClient) -> MCPServerRec
         record.tools = tools
         record.resources = resources
         record.prompts = prompts
+        if tools:
+            _names = sorted(t.name for t in tools)
+            record.tool_name_hash = hashlib.sha256(_json.dumps(_names).encode()).hexdigest()[:16]
         # FP-005: tools/list returned 401/403 — data plane is protected even if initialize was open
         if data_plane_auth and record.auth_state == AuthState.NONE:
             record.auth_state = AuthState.REQUIRED
@@ -329,6 +334,9 @@ async def _probe_sse(url: str, client: httpx.AsyncClient) -> MCPServerRecord | N
                         record.tools = tools
                         record.resources = resources
                         record.prompts = prompts
+                        if tools:
+                            _names = sorted(t.name for t in tools)
+                            record.tool_name_hash = hashlib.sha256(_json.dumps(_names).encode()).hexdigest()[:16]
                         # FP-005: tools/list returned 401/403 — data plane is protected
                         if data_plane_auth and record.auth_state == AuthState.NONE:
                             record.auth_state = AuthState.REQUIRED
