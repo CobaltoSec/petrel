@@ -274,6 +274,14 @@ def discover(
     """Discover exposed MCP servers via passive sources (crt.sh + HuggingFace + Censys + GitHub + npm + Smithery + PyPI + FOFA)."""
     console.print(_BANNER)
 
+    # Auto-generate output path if not provided so discover always saves JSONL
+    if output is None:
+        from datetime import datetime as _dt
+        _runs_dir = Path(__file__).parent.parent / "runs"
+        _runs_dir.mkdir(exist_ok=True)
+        output = _runs_dir / f"discover-{_dt.now().strftime('%Y%m%d-%H%M%S')}.jsonl"
+        console.print(f"[dim]Output: {output}[/dim]")
+
     run_id = create_run(label=str(output) if output else None, source="discover", jsonl_path=str(output) if output else None)
 
     async def _run() -> tuple[list[MCPServerRecord], int]:
@@ -351,6 +359,7 @@ def discover(
                 MofNCompleteColumn(),
                 TimeRemainingColumn(),
                 console=err,
+                disable=not sys.stderr.isatty(),
             ) as progress:
                 task = progress.add_task("[cyan]Fingerprinting...", total=candidate_count)
 
@@ -492,6 +501,7 @@ def scan(
                 MofNCompleteColumn(),
                 TimeRemainingColumn(),
                 console=err,
+                disable=not sys.stderr.isatty(),
             ) as progress:
                 task = progress.add_task("[cyan]Fingerprinting...", total=len(urls))
 
