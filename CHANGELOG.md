@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.10.0] — 2026-08-10
+
 ### Added
 - feat(watch): `petrel watch` — continuous CRITICAL pool monitoring; re-probes CRITICAL servers from last run every `--interval` hours (default 6h), inserts `server_run_snapshots` rows, applies per-domain throttle Semaphore(3) (PETREL-V11)
 - test: 14 new tests covering 6 previously-untested code paths: feed-ibis dedup guard, finish_run disappearance breakdown columns, get_trend() public API, discover integration (petrel_version + snapshot insert), capability_cluster population from _detect_clusters(), tool_name_hash in both _probe_streamable and _probe_sse (PETREL-V11)
