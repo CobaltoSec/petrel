@@ -719,3 +719,44 @@ def test_sr10_not_flagged_when_protocol_unknown():
     )
     result = score_server(record)
     assert not any("anonymous server" in r for r in result.risk_reasons)
+
+
+# ---------------------------------------------------------------------------
+# Longitudinal — capability_cluster populated by score_server
+# ---------------------------------------------------------------------------
+
+def test_score_server_capability_cluster_exec_network():
+    """score_server() stores 'exec+network' cluster key in record.capability_cluster."""
+    record = MCPServerRecord(
+        url="http://cluster.example.com",
+        protocol=Protocol.STREAMABLE_HTTP,
+        auth_state=AuthState.BEARER,
+        tools=[MCPTool(name="execute_bash"), MCPTool(name="fetch_url")],
+    )
+    result = score_server(record)
+    # _detect_clusters returns (tier, reason, "exec+network") for this combo
+    assert "exec+network" in result.capability_cluster
+
+
+def test_score_server_capability_cluster_empty_for_benign_tools():
+    """score_server() leaves capability_cluster == [] when no clusters are detected."""
+    record = MCPServerRecord(
+        url="http://benign.example.com",
+        protocol=Protocol.STREAMABLE_HTTP,
+        auth_state=AuthState.BEARER,
+        tools=[MCPTool(name="get_weather")],
+    )
+    result = score_server(record)
+    assert result.capability_cluster == []
+
+
+def test_score_server_capability_cluster_redundant_exec():
+    """score_server() stores 'redundant_exec' when two exec-family tools are present."""
+    record = MCPServerRecord(
+        url="http://multi-exec.example.com",
+        protocol=Protocol.STREAMABLE_HTTP,
+        auth_state=AuthState.BEARER,
+        tools=[MCPTool(name="execute_bash"), MCPTool(name="run_command")],
+    )
+    result = score_server(record)
+    assert "redundant_exec" in result.capability_cluster

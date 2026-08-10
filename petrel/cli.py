@@ -1498,6 +1498,25 @@ def trend(
 
 
 # ---------------------------------------------------------------------------
+# watch (PETREL-V11)
+# ---------------------------------------------------------------------------
+
+@app.command(name="watch")
+def watch(
+    interval: Annotated[int, typer.Option("--interval", "-i", help="Hours between re-probe rounds")] = 6,
+    max_rounds: Annotated[int, typer.Option("--max-rounds", "-n", help="Max rounds (0 = infinite)")] = 0,
+) -> None:
+    """Re-probe CRITICAL exec-cluster servers from the last petrel discover run.
+
+    Reads CRITICAL servers with exec-family capability_cluster from the last
+    petrel discover run, re-probes every --interval hours, and stores run
+    snapshots for longitudinal tracking. Press Ctrl+C to stop.
+    """
+    from .watch import watch_command as _impl
+    _impl(interval=interval, max_rounds=max_rounds)
+
+
+# ---------------------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------------------
 

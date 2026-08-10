@@ -851,3 +851,148 @@ async def test_fp006_non_throttled_domain_no_semaphore(httpx_mock: HTTPXMock):
 
     # No throttle semaphore created for plain .example.com
     assert "example.com" not in _domain_sems
+
+
+# ---------------------------------------------------------------------------
+# LONGITUDINAL — tool_name_hash set from tools/list response
+# ---------------------------------------------------------------------------
+
+import hashlib as _hashlib
+import json as _json_mod
+
+
+@pytest.mark.asyncio
+async def test_tool_name_hash_set_in_streamable_probe(httpx_mock: HTTPXMock):
+    """tool_name_hash is computed and stored after a successful tools/list (streamable-http)."""
+    tool_names = ["bash", "read_file"]
+
+    httpx_mock.add_response(
+        method="POST",
+        url="http://hashsm.example.com/mcp",
+        json=_make_init_response(),
+    )
+    # tools/list with known tool names
+    httpx_mock.add_response(
+        method="POST",
+        url="http://hashsm.example.com/mcp",
+        json={
+            "jsonrpc": "2.0",
+            "id": 2,
+            "result": {
+                "tools": [{"name": n} for n in tool_names],
+            },
+        },
+    )
+    # resources/list — empty
+    httpx_mock.add_response(
+        method="POST",
+        url="http://hashsm.example.com/mcp",
+        json={"jsonrpc": "2.0", "id": 3, "result": {"resources": []}},
+    )
+    # prompts/list — empty
+    httpx_mock.add_response(
+        method="POST",
+        url="http://hashsm.example.com/mcp",
+        json={"jsonrpc": "2.0", "id": 4, "result": {"prompts": []}},
+    )
+
+    async with httpx.AsyncClient() as client:
+        record = await probe_url("http://hashsm.example.com", client)
+
+    assert record is not None
+    expected_hash = _hashlib.sha256(
+        _json_mod.dumps(sorted(tool_names)).encode()
+    ).hexdigest()[:16]
+    assert record.tool_name_hash == expected_hash
+
+
+@pytest.mark.asyncio
+async def test_tool_name_hash_none_when_no_tools(httpx_mock: HTTPXMock):
+    """tool_name_hash is None when tools/list returns empty list (no names to hash)."""
+    httpx_mock.add_response(
+        method="POST",
+        url="http://hashnotools.example.com/mcp",
+        json=_make_init_response(),
+    )
+    # tools/list — empty
+    httpx_mock.add_response(
+        method="POST",
+        url="http://hashnotools.example.com/mcp",
+        json={"jsonrpc": "2.0", "id": 2, "result": {"tools": []}},
+    )
+    # resources/list
+    httpx_mock.add_response(
+        method="POST",
+        url="http://hashnotools.example.com/mcp",
+        json={"jsonrpc": "2.0", "id": 3, "result": {"resources": []}},
+    )
+    # prompts/list
+    httpx_mock.add_response(
+        method="POST",
+        url="http://hashnotools.example.com/mcp",
+        json={"jsonrpc": "2.0", "id": 4, "result": {"prompts": []}},
+    )
+
+    async with httpx.AsyncClient() as client:
+        record = await probe_url("http://hashnotools.example.com", client)
+
+    assert record is not None
+    # No tools → hash is not computed → None
+    assert record.tool_name_hash is None
+
+
+@pytest.mark.asyncio
+async def test_tool_name_hash_set_in_sse_probe(httpx_mock: HTTPXMock):
+    """tool_name_hash is computed in the SSE code path after a successful tools/list."""
+    from petrel.fingerprint.probe import _probe_sse
+
+    tool_names = ["execute_bash", "fetch_url"]
+    msg_url = "http://hashsse.example.com/messages?sessionId=xyz"
+
+    httpx_mock.add_response(
+        method="GET",
+        url="http://hashsse.example.com/sse",
+        headers={"content-type": "text/event-stream"},
+        content=b"data: /messages?sessionId=xyz\n\n",
+    )
+    # initialize
+    httpx_mock.add_response(
+        method="POST",
+        url=msg_url,
+        json={
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": {"protocolVersion": "2024-11-05", "capabilities": {}},
+        },
+    )
+    # tools/list
+    httpx_mock.add_response(
+        method="POST",
+        url=msg_url,
+        json={
+            "jsonrpc": "2.0",
+            "id": 2,
+            "result": {"tools": [{"name": n} for n in tool_names]},
+        },
+    )
+    # resources/list
+    httpx_mock.add_response(
+        method="POST",
+        url=msg_url,
+        json={"jsonrpc": "2.0", "id": 3, "result": {"resources": []}},
+    )
+    # prompts/list
+    httpx_mock.add_response(
+        method="POST",
+        url=msg_url,
+        json={"jsonrpc": "2.0", "id": 4, "result": {"prompts": []}},
+    )
+
+    async with httpx.AsyncClient() as client:
+        record = await _probe_sse("http://hashsse.example.com", client)
+
+    assert record is not None
+    expected_hash = _hashlib.sha256(
+        _json_mod.dumps(sorted(tool_names)).encode()
+    ).hexdigest()[:16]
+    assert record.tool_name_hash == expected_hash

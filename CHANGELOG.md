@@ -3,6 +3,8 @@
 ## [Unreleased]
 
 ### Added
+- feat(watch): `petrel watch` — continuous CRITICAL pool monitoring; re-probes CRITICAL servers from last run every `--interval` hours (default 6h), inserts `server_run_snapshots` rows, applies per-domain throttle Semaphore(3) (PETREL-V11)
+- test: 14 new tests covering 6 previously-untested code paths: feed-ibis dedup guard, finish_run disappearance breakdown columns, get_trend() public API, discover integration (petrel_version + snapshot insert), capability_cluster population from _detect_clusters(), tool_name_hash in both _probe_streamable and _probe_sse (PETREL-V11)
 - feat(store): `consecutive_confirmed_runs` column in `server_history` — persistence scoring +10/run confirmado (max +20) aplicado en discover/scan (PETREL-V10)
 - feat(cli): `petrel feed-ibis RESULTS` — genera stubs de disclosure en Ibis para servers CRITICAL/HIGH con no-auth o exec cluster; --dry-run para preview (PETREL-V10)
 - feat(store): runs.db +3 disappearance breakdown columns (auth_added/taken_down/url_changed) + petrel trend support (PETREL-V10)

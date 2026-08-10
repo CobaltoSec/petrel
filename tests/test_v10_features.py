@@ -589,3 +589,232 @@ def test_feed_ibis_empty_no_crash(tmp_path: Path):
     result = runner.invoke(app, ["feed-ibis", str(jsonl), "--dry-run"])
     assert result.exit_code == 0
     assert result.output  # some message printed
+
+
+# ---------------------------------------------------------------------------
+# feed-ibis dedup guard — _load_ibis_known() branch
+# ---------------------------------------------------------------------------
+
+def test_feed_ibis_dedup_skips_already_known_server(tmp_path: Path):
+    """feed-ibis dedup guard: server whose hostname already exists in Ibis is skipped."""
+    from unittest.mock import patch
+
+    records = [
+        _make_record(
+            url="https://crit.example.com",
+            risk_tier="CRITICAL",
+            auth_state="none",
+            priority_score=90,
+        ),
+    ]
+    jsonl = _make_jsonl(tmp_path, records)
+
+    with patch("petrel.cli._load_ibis_known", return_value={"crit.example.com": "GHSA-xxxx-0001"}):
+        result = runner.invoke(app, ["feed-ibis", str(jsonl), "--dry-run"])
+
+    assert result.exit_code == 0, result.output
+    # The dedup skip message must appear
+    assert "already in Ibis" in result.output
+    # The GHSA ID must be shown so the user knows why it was skipped
+    assert "GHSA-xxxx-0001" in result.output
+    # Summary: 1 already in Ibis, 0 submitted
+    assert "1 already in Ibis" in result.output
+
+
+def test_feed_ibis_dedup_url_key_match(tmp_path: Path):
+    """Dedup also matches on the full URL key (not just hostname)."""
+    from unittest.mock import patch
+
+    records = [
+        _make_record(
+            url="https://other.example.com",
+            risk_tier="CRITICAL",
+            auth_state="none",
+            priority_score=80,
+        ),
+    ]
+    jsonl = _make_jsonl(tmp_path, records)
+
+    # Key is the full URL (lower-cased)
+    with patch(
+        "petrel.cli._load_ibis_known",
+        return_value={"https://other.example.com": "GHSA-xxxx-0002"},
+    ):
+        result = runner.invoke(app, ["feed-ibis", str(jsonl), "--dry-run"])
+
+    assert result.exit_code == 0, result.output
+    assert "already in Ibis" in result.output
+    assert "GHSA-xxxx-0002" in result.output
+
+
+# ---------------------------------------------------------------------------
+# finish_run() — disappearance breakdown columns
+# ---------------------------------------------------------------------------
+
+def test_finish_run_stores_disappearance_breakdown(tmp_path: Path):
+    """finish_run(auth_added=3, taken_down=5, url_changed=1) persists the three columns."""
+    import petrel.store as store_mod
+    from unittest.mock import patch
+
+    db_path = tmp_path / "runs.db"
+    with patch.object(store_mod, "DB_PATH", db_path):
+        run_id = store_mod.create_run("breakdown-test", "github")
+        store_mod.finish_run(run_id, [], auth_added=3, taken_down=5, url_changed=1)
+        rows = store_mod.list_runs()
+
+    row = next(r for r in rows if r["id"] == run_id)
+    assert row["auth_added"] == 3
+    assert row["taken_down"] == 5
+    assert row["url_changed"] == 1
+
+
+def test_finish_run_breakdown_defaults_to_zero(tmp_path: Path):
+    """finish_run without breakdown kwargs stores zeros (not NULL) in those columns."""
+    import petrel.store as store_mod
+    from unittest.mock import patch
+
+    db_path = tmp_path / "runs.db"
+    with patch.object(store_mod, "DB_PATH", db_path):
+        run_id = store_mod.create_run("no-breakdown-test", "github")
+        store_mod.finish_run(run_id, [])
+        rows = store_mod.list_runs()
+
+    row = next(r for r in rows if r["id"] == run_id)
+    # Defaults: SQLite stores 0 (INTEGER DEFAULT 0)
+    assert row["auth_added"] == 0
+    assert row["taken_down"] == 0
+    assert row["url_changed"] == 0
+
+
+# ---------------------------------------------------------------------------
+# get_trend() — metric time-series API
+# ---------------------------------------------------------------------------
+
+def test_get_trend_returns_metric_series(tmp_path: Path):
+    """get_trend('auth_pct') returns list[dict] with id/label/started_at/auth_pct fields."""
+    import petrel.store as store_mod
+    from unittest.mock import patch
+
+    db_path = tmp_path / "runs.db"
+    with patch.object(store_mod, "DB_PATH", db_path):
+        rid1 = store_mod.create_run("run-a", "github")
+        store_mod.finish_run(rid1, [_make_mock_record("none", 40), _make_mock_record("bearer", 60)])
+        rid2 = store_mod.create_run("run-b", "github")
+        store_mod.finish_run(rid2, [_make_mock_record("bearer", 80)])
+        trend = store_mod.get_trend("auth_pct")
+
+    assert isinstance(trend, list)
+    assert len(trend) == 2
+    for row in trend:
+        assert "id" in row
+        assert "started_at" in row
+        assert "auth_pct" in row
+
+    # First run: 1 authed out of 2 = 50%
+    r1 = next(r for r in trend if r["id"] == rid1)
+    assert r1["auth_pct"] == pytest.approx(50.0, abs=0.1)
+
+    # Second run: 1 authed out of 1 = 100%
+    r2 = next(r for r in trend if r["id"] == rid2)
+    assert r2["auth_pct"] == pytest.approx(100.0, abs=0.1)
+
+
+def test_get_trend_invalid_metric_returns_empty(tmp_path: Path):
+    """get_trend() with an unknown metric name returns [] without raising."""
+    import petrel.store as store_mod
+    from unittest.mock import patch
+
+    db_path = tmp_path / "runs.db"
+    with patch.object(store_mod, "DB_PATH", db_path):
+        result = store_mod.get_trend("not_a_real_metric")
+
+    assert result == []
+
+
+def test_get_trend_allowed_metrics_all_work(tmp_path: Path):
+    """All documented metric names are accepted by get_trend() (returns a list)."""
+    import petrel.store as store_mod
+    from unittest.mock import patch
+
+    allowed = [
+        "confirmed_count", "critical_count", "target_count",
+        "auth_pct", "avg_priority_score",
+        "auth_added", "taken_down", "url_changed",
+    ]
+
+    db_path = tmp_path / "runs.db"
+    with patch.object(store_mod, "DB_PATH", db_path):
+        rid = store_mod.create_run("metric-test", "github")
+        store_mod.finish_run(rid, [], auth_added=1, taken_down=2, url_changed=3)
+        for metric in allowed:
+            result = store_mod.get_trend(metric)
+            assert isinstance(result, list), f"get_trend('{metric}') should return list"
+            assert len(result) == 1
+
+
+# ---------------------------------------------------------------------------
+# discover command — petrel_version set + insert_run_snapshots called
+# ---------------------------------------------------------------------------
+
+def test_discover_sets_petrel_version_and_inserts_snapshots(tmp_path: Path):
+    """discover sets petrel_version on confirmed records and calls insert_run_snapshots."""
+    import petrel.store as store_mod
+    import sqlite3
+    from unittest.mock import patch
+    from petrel.models import MCPServerRecord, Protocol, AuthState, RiskTier, Platform
+    from petrel import __version__
+
+    db_path = tmp_path / "runs.db"
+    out_jsonl = tmp_path / "discover-out.jsonl"
+
+    # Synthetic confirmed record (protocol != UNKNOWN → is_confirmed_mcp = True)
+    synthetic = MCPServerRecord(
+        url="https://disc-watch.example.com",
+        protocol=Protocol.STREAMABLE_HTTP,
+        auth_state=AuthState.NONE,
+        risk_tier=RiskTier.HIGH,
+        risk_reasons=[],
+        tools=[],
+        discovered_via="github",
+        behind_cloudflare=False,
+        platform=Platform.UNKNOWN,
+        endpoint_path="/mcp",
+        priority_score=60,
+    )
+
+    async def _fake_gather(**kwargs):
+        return [("https://disc-watch.example.com", "github")]
+
+    async def _fake_probe_batch(urls, client, *, concurrency=20, source_map=None, on_result=None):
+        # Fire the callback so _on_result in discover() sets petrel_version
+        if on_result is not None:
+            on_result(synthetic)
+        return [synthetic]
+
+    with patch.object(store_mod, "DB_PATH", db_path), \
+         patch("petrel.cli._gather_sources", new=_fake_gather), \
+         patch("petrel.cli.probe_urls_batch", new=_fake_probe_batch), \
+         patch("petrel.cli.generate_run_summary", return_value=tmp_path / "summary.md"):
+        result = runner.invoke(
+            app,
+            ["discover", "--output", str(out_jsonl)],
+        )
+
+    assert result.exit_code == 0, result.output
+
+    # 1. Output JSONL must have petrel_version set on the confirmed record
+    lines = [l for l in out_jsonl.read_text().splitlines() if l.strip()]
+    assert len(lines) == 1, "Expected exactly one record in the output JSONL"
+    rec = json.loads(lines[0])
+    assert rec["petrel_version"] == __version__, (
+        f"Expected petrel_version={__version__!r}, got {rec['petrel_version']!r}"
+    )
+
+    # 2. server_run_snapshots table must have exactly one row (insert_run_snapshots called)
+    conn = sqlite3.connect(str(db_path))
+    try:
+        snaps = conn.execute("SELECT petrel_version FROM server_run_snapshots").fetchall()
+    finally:
+        conn.close()
+    assert len(snaps) == 1, "Expected one snapshot row from insert_run_snapshots"
+    assert snaps[0][0] == __version__
