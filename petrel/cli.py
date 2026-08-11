@@ -1293,7 +1293,10 @@ def diff(
         from .diff import classify_disappearances_batch
 
         console.print(f"[cyan]Classifying {len(disappeared)} disappeared server(s)...[/cyan]")
-        groups = asyncio.run(classify_disappearances_batch(list(disappeared.values())))
+        groups = asyncio.run(classify_disappearances_batch(
+            list(disappeared.values()),
+            current_servers=list(new_map.values()),
+        ))
         console.print(f"\nDisappeared servers ({len(disappeared)} total):")
         console.print(f"  [yellow]🔒 auth_added:  {len(groups['auth_added']):>3}[/yellow]  (likely hardened after our scan)")
         console.print(f"  [red]📴 taken_down:  {len(groups['taken_down']):>3}[/red]")
@@ -1495,6 +1498,71 @@ def trend(
         label = r.get("label") or f"run-{r['id']}"
         started = (r.get("started_at") or "")[:10]
         print(f"{started}  {label:30s}  {metric}={r.get(metric, 'N/A')}")
+
+
+@app.command(name="longitudinal")
+def longitudinal(
+    url: Annotated[str, typer.Argument(help="MCP server URL to inspect")],
+    db: Annotated[Optional[Path], typer.Option("--db", help="Path to runs.db (default: ~/.petrel/runs.db)")] = None,
+) -> None:
+    """Show run-by-run history of a single MCP server from stored snapshots."""
+    import sqlite3
+
+    from .store import DB_PATH
+
+    db_path = db or DB_PATH
+    if not Path(db_path).exists():
+        console.print(f"[red]Database not found:[/red] {db_path}")
+        raise typer.Exit(1)
+
+    con = sqlite3.connect(db_path)
+    con.row_factory = sqlite3.Row
+    rows = con.execute(
+        """
+        SELECT srs.*, r.started_at AS run_started_at
+        FROM server_run_snapshots srs
+        JOIN runs r ON srs.run_id = r.id
+        WHERE srs.url = ?
+        ORDER BY r.started_at ASC
+        """,
+        (url,),
+    ).fetchall()
+    con.close()
+
+    if not rows:
+        console.print(f"No history found for [bold]{url}[/bold]")
+        raise typer.Exit(0)
+
+    table = Table(title=f"Longitudinal history — {url}", show_lines=False)
+    table.add_column("Run date", style="dim", no_wrap=True)
+    table.add_column("Auth", no_wrap=True)
+    table.add_column("Risk tier", no_wrap=True)
+    table.add_column("Priority", justify="right")
+    table.add_column("Tools", justify="right")
+    table.add_column("Tool hash", style="dim", no_wrap=True)
+    table.add_column("Probe error", style="dim")
+
+    _TIER_COLOR_LOCAL = {
+        "CRITICAL": "red",
+        "HIGH": "yellow",
+        "MEDIUM": "cyan",
+        "LOW": "green",
+        "INFO": "dim",
+    }
+
+    for row in rows:
+        run_date = (row["run_started_at"] or "")[:10]
+        auth = row["auth_state"] or ""
+        tier = row["risk_tier"] or ""
+        color = _TIER_COLOR_LOCAL.get(tier, "white")
+        tier_str = f"[{color}]{tier}[/{color}]" if tier else ""
+        priority = f"{row['priority_score']:.1f}" if row["priority_score"] is not None else ""
+        tool_count = str(row["tool_count"]) if row["tool_count"] is not None else ""
+        tool_hash = (row["tool_name_hash"] or "")[:8]
+        probe_err = ""  # not stored in snapshots schema; placeholder for future
+        table.add_row(run_date, auth, tier_str, priority, tool_count, tool_hash, probe_err)
+
+    console.print(table)
 
 
 # ---------------------------------------------------------------------------
